@@ -18,6 +18,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+test = ["pytest", "hypothesis"]
+
 [project.scripts]
 kinsoku = "kinsoku.cli:main"
 
