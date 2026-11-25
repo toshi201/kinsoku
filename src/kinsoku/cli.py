@@ -8,7 +8,7 @@ import sys
 from typing import List, Optional
 
 from . import __version__
-from ._core import fill, truncate, width
+from ._core import PRESETS, fill, truncate, width
 from .tategaki import tategaki
 
 
@@ -41,6 +41,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                    help="keep at most N lines, ending with …")
     p.add_argument("--ambiguous-width", type=int, choices=(1, 2), default=1,
                    help="width of East Asian Ambiguous chars (default: 1)")
+    p.add_argument("--rules", choices=tuple(PRESETS), default="ja",
+                   help="kinsoku rules preset (default: ja)")
     p.add_argument("--truncate", action="store_true",
                    help="truncate each line with … instead of wrapping")
     p.add_argument("--width-of", action="store_true",
@@ -93,6 +95,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         subsequent_indent=args.subsequent_indent,
         max_lines=args.max_lines,
         ambiguous_width=args.ambiguous_width,
+        rules=args.rules,
         )
     except ValueError as e:
         p.error(str(e))

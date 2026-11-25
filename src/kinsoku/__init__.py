@@ -2,8 +2,10 @@
 
 from ._core import (
     HANGABLE,
+    KinsokuRules,
     NO_END,
     NO_START,
+    PRESETS,
     char_width,
     fill,
     pad,
@@ -18,8 +20,10 @@ from .wrapper import KinsokuWrapper, dedent, indent
 
 __all__ = [
     "HANGABLE",
+    "KinsokuRules",
     "NO_END",
     "NO_START",
+    "PRESETS",
     "char_width",
     "fill",
     "pad",
