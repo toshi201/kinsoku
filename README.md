@@ -268,6 +268,23 @@ kinsoku --table --style grid -w 60 data.csv
 cat data.tsv | kinsoku --table --style markdown
 ```
 
+### ルビ記法
+
+青空文庫・なろう形式のルビ（`｜漢字《かんじ》` / `漢字《かんじ》`）を `ruby=True` で認識し、
+親文字とルビをひとかたまりとして扱います（途中で改行せず、前後の禁則も守ります）。
+
+```python
+kinsoku.wrap("あいう漢字《かんじ》。", 8, ruby=True, ruby_width="base")
+# => ['あいう', '漢字《かんじ》。']
+kinsoku.strip_ruby("｜東京《とうきょう》の漢字《かんじ》")  # => '東京の漢字'
+kinsoku.ruby_to_html("漢字《かんじ》")  # => '<ruby>漢字<rt>かんじ</rt></ruby>'
+```
+
+- 親文字: `｜`（または半角 `|`）があればそこから `《` まで、なければ直前の漢字の連続（`々〆ヶ〇` を含む）
+- `ruby_width="full"`（既定）: 記法をそのまま表示する前提で、`｜《》` とルビも幅に数える
+- `ruby_width="base"`: 親文字の幅だけを数える（あとで本物のルビとして描画する場合）
+- CLI: `kinsoku -w 40 --ruby [--ruby-width base] novel.txt`
+
 ## 仕様
 
 - **行頭禁則**: `、。，．）」』】ー` 小書きの仮名 `ぁぃぅっゃ` `ァィゥッャ` `…・：；々` など
@@ -316,9 +333,12 @@ applies Japanese line-breaking rules:
   characters, one space for latin text, blank lines kept); `rewrap(text, width)`
   unwraps and wraps again. CLI: `--unwrap`, `--rewrap`
 - `table(rows, headers)` renders aligned tables (styles `simple`, `grid`, `markdown`, `plain`) with kinsoku wrapping inside cells, a `width` budget, per-column `align` and ANSI-safe cells; `kinsoku --table` formats CSV/TSV input
+- `ruby=True` keeps ruby notation (`｜漢字《かんじ》`, `漢字《かんじ》`) unbroken;
+  `ruby_width="full"` (default) or `"base"`; plus `strip_ruby` / `ruby_to_html`
 
 API: `width`, `char_width`, `strip_ansi`, `wrap`, `fill`, `shorten`, `truncate`, `pad`,
-`KinsokuWrapper`, `dedent`, `indent`, `tategaki`, `KinsokuRules`, `PRESETS`, `ansi_reflow`, `unwrap`, `rewrap`, `table`.
+`KinsokuWrapper`, `dedent`, `indent`, `tategaki`, `KinsokuRules`, `PRESETS`, `ansi_reflow`, `unwrap`, `rewrap`, `table`,
+`strip_ruby`, `ruby_to_html`.
 CLI: `kinsoku -w N [FILE...]`.
 
 License: MIT

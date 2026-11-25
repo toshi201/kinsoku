@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import re
 import unicodedata
 import dataclasses
@@ -9,7 +10,16 @@ from dataclasses import dataclass
 from functools import lru_cache
 from itertools import repeat
 from types import MappingProxyType
-from typing import FrozenSet, Iterable, Iterator, List, Mapping, Optional, Union
+from typing import (
+    FrozenSet,
+    Iterable,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    Union,
+)
 
 # 行頭禁則: characters that must not start a line.
 NO_START = frozenset(
@@ -132,6 +142,51 @@ _ANSI_RE = re.compile(
     r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"
     r"|\x1b[@-Z\\-_]"
 )
+
+
+# Ruby notation (青空文庫 / なろう形式): ``｜base《ruby》`` or ``漢字《ruby》``.
+# Explicit form: base runs from ``｜`` (U+FF5C) or ``|`` up to ``《``.
+# Implicit form: base is the run of kanji right before ``《``.
+_KANJI = "\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff々〆ヶ〇"
+_RUBY_RE = re.compile(
+    r"[｜|](?P<ebase>[^｜|《》\n]+)《(?P<eruby>[^《》\n]+)》"
+    r"|(?P<ibase>[" + _KANJI + r"]+)《(?P<iruby>[^《》\n]+)》"
+)
+_RUBY_WIDTHS = ("base", "full")
+_LEADING_ANSI_RE = re.compile("(?:" + _ANSI_RE.pattern + ")+")
+_TRAILING_ANSI_RE = re.compile("(?:" + _ANSI_RE.pattern + r")+\Z")
+
+
+def _ruby_parts(m: "re.Match[str]") -> Tuple[str, str]:
+    """(base, ruby) of a ruby-notation match."""
+    if m.group("ebase") is not None:
+        return m.group("ebase"), m.group("eruby")
+    return m.group("ibase"), m.group("iruby")
+
+
+def strip_ruby(text: str) -> str:
+    """Remove ruby annotations, keeping only the base text.
+
+    ``strip_ruby("｜東京《とうきょう》の漢字《かんじ》")`` → ``"東京の漢字"``.
+    """
+    return _RUBY_RE.sub(lambda m: _ruby_parts(m)[0], text)
+
+
+def ruby_to_html(text: str) -> str:
+    """Convert ruby notation to HTML ``<ruby>`` markup.
+
+    ``ruby_to_html("漢字《かんじ》")`` → ``"<ruby>漢字<rt>かんじ</rt></ruby>"``.
+    All text (inside and outside ruby) is HTML-escaped.
+    """
+    out: List[str] = []
+    pos = 0
+    for m in _RUBY_RE.finditer(text):
+        base, rt = _ruby_parts(m)
+        out.append(html.escape(text[pos:m.start()]))
+        out.append(f"<ruby>{html.escape(base)}<rt>{html.escape(rt)}</rt></ruby>")
+        pos = m.end()
+    out.append(html.escape(text[pos:]))
+    return "".join(out)
 
 
 def strip_ansi(text: str) -> str:
@@ -369,16 +424,63 @@ def _clusters_plain(text: str) -> Iterator[str]:
         yield buf
 
 
+def _pieces(
+    text: str,
+    ambiguous_width: int,
+    ruby: bool = False,
+    ruby_width: str = "full",
+) -> Iterator[Tuple[str, int]]:
+    """Yield ``(cluster, width)`` pairs.
+
+    With ``ruby=True`` every ruby notation is yielded as one indivisible
+    cluster; its width is that of the base text (``ruby_width="base"``) or
+    of the whole notation (``"full"``).  ANSI escapes right before a ruby
+    notation are attached to its start and those right after it to its end,
+    so styling around a ruby unit always moves with it.
+    """
+    if not ruby or "《" not in text:
+        for cl in _clusters(text):
+            yield cl, width(cl, ambiguous_width)
+        return
+    pos = 0
+    held: Optional[Tuple[str, int]] = None  # previous ruby unit
+    for m in _RUBY_RE.finditer(text):
+        seg = text[pos:m.start()]
+        if held is not None:
+            lead = _LEADING_ANSI_RE.match(seg)
+            if lead:
+                held = (held[0] + lead.group(), held[1])
+                seg = seg[lead.end():]
+            yield held
+        pre = ""
+        tail = _TRAILING_ANSI_RE.search(seg)
+        if tail:
+            pre = tail.group()
+            seg = seg[:tail.start()]
+        for cl in _clusters(seg):
+            yield cl, width(cl, ambiguous_width)
+        unit = m.group()
+        if ruby_width == "base":
+            held = (pre + unit, width(_ruby_parts(m)[0], ambiguous_width))
+        else:
+            held = (pre + unit, width(unit, ambiguous_width))
+        pos = m.end()
+    seg = text[pos:]
+    if held is not None:
+        lead = _LEADING_ANSI_RE.match(seg)
+        if lead:
+            held = (held[0] + lead.group(), held[1])
+            seg = seg[lead.end():]
+        yield held
+    for cl in _clusters(seg):
+        yield cl, width(cl, ambiguous_width)
+
+
 def _base(cl: str) -> str:
     """First visible character of a cluster ("" for a pure escape cluster)."""
     if cl[:1] == "\x1b":
         cl = strip_ansi(cl)
     return cl[:1]
-
-
-def _is_wide_cluster(cl: str, ambiguous_width: int) -> bool:
-    b = _base(cl)
-    return bool(b) and char_width(b, ambiguous_width) >= 2
 
 
 def _first(text: str) -> str:
@@ -404,8 +506,14 @@ def _atoms(
     ambiguous_width: int,
     keep_all: bool = False,
     rules: KinsokuRules = _JA,
+    ruby: bool = False,
+    ruby_width: str = "full",
 ) -> List[_Unit]:
-    """Split text into atoms: spaces, word runs, single wide clusters."""
+    """Split text into atoms: spaces, word runs, single wide clusters.
+
+    A ruby notation (``ruby=True``) is one atom, or part of a latin word
+    when its base text starts with a narrow character.
+    """
     atoms: List[_Unit] = []
     word: List[str] = []  # clusters of the current word run
     word_w = 0
@@ -413,6 +521,31 @@ def _atoms(
     cw = _char_width
     no_start = rules.no_start
     no_end = rules.no_end
+
+    if ruby and "《" in text:
+        for cl, w in _pieces(text, ambiguous_width, True, ruby_width):
+            b = _base(cl)
+            s = strip_ansi(cl) if "\x1b" in cl else cl
+            if len(s) > 1 and s[0] in ("｜", "|") and "《" in s:
+                b = s[1]  # explicit ruby unit: classify by its base text
+            if b and b in _SPACES:
+                if word:
+                    append(_Unit("".join(word), word_w))
+                    word, word_w = [], 0
+                append(_Unit(cl, w or 1, space=True))
+            elif b and not keep_all and (
+                char_width(b, ambiguous_width) >= 2 or b in no_start or b in no_end
+            ):
+                if word:
+                    append(_Unit("".join(word), word_w))
+                    word, word_w = [], 0
+                append(_Unit(cl, w))
+            else:
+                word.append(cl)
+                word_w += w
+        if word:
+            append(_Unit("".join(word), word_w))
+        return atoms
 
     for cl in _clusters(text):
         # The width of a word run is the sum of its cluster widths, so each
@@ -476,11 +609,24 @@ def _glue(
 
 
 def _split_long(
-    u: _Unit, limit: int, ambiguous_width: int, rules: KinsokuRules = _JA
+    u: _Unit,
+    limit: int,
+    ambiguous_width: int,
+    rules: KinsokuRules = _JA,
+    ruby: bool = False,
+    ruby_width: str = "full",
 ) -> List[_Unit]:
-    """Hard-split an over-long unit into chunks no wider than ``limit``."""
-    cls = list(_clusters(u.text))
-    ws = [width(c, ambiguous_width) for c in cls]
+    """Hard-split an over-long unit into chunks no wider than ``limit``.
+
+    Ruby notations (``ruby=True``) are never split.
+    """
+    if ruby:
+        pieces = list(_pieces(u.text, ambiguous_width, ruby, ruby_width))
+        cls = [c for c, _ in pieces]
+        ws = [w for _, w in pieces]
+    else:
+        cls = list(_clusters(u.text))
+        ws = [width(c, ambiguous_width) for c in cls]
 
     def good_break(i: int) -> bool:
         # breaking before cls[i] respects kinsoku
@@ -503,6 +649,12 @@ def _split_long(
                 if good_break(j):
                     end = j
                     break
+            else:
+                if ruby and end == start + 1 and _RUBY_RE.fullmatch(strip_ansi(cls[start])):
+                    # a lone, unbreakable ruby unit: let the line overflow
+                    # rather than push 。」 etc. to the start of the next line
+                    while end < n and not good_break(end):
+                        end += 1
         chunks.append(_Unit("".join(cls[start:end]), sum(ws[start:end])))
         start = end
     return chunks
@@ -518,9 +670,14 @@ def _wrap_line(
     ambiguous_width: int,
     rules: KinsokuRules = _JA,
     keep_escapes: bool = False,
+    ruby: bool = False,
+    ruby_width: str = "full",
 ) -> List[str]:
     units = _glue(
-        _atoms(line, ambiguous_width, keep_all, rules), hanging, ambiguous_width, rules
+        _atoms(line, ambiguous_width, keep_all, rules, ruby, ruby_width),
+        hanging,
+        ambiguous_width,
+        rules,
     )
     lines: List[str] = []
     cur: List[_Unit] = []
@@ -560,7 +717,9 @@ def _wrap_line(
             flush()
         if break_long_words:
             while u.width - u.hang > limit():
-                pieces = _split_long(u, limit(), ambiguous_width, rules)
+                pieces = _split_long(
+                    u, limit(), ambiguous_width, rules, ruby, ruby_width
+                )
                 if len(pieces) < 2:
                     break
                 lines.append(pieces[0].text)
@@ -592,6 +751,8 @@ def wrap(
     ambiguous_width: int = 1,
     rules: RulesLike = "ja",
     ansi_reflow: bool = False,
+    ruby: bool = False,
+    ruby_width: str = "full",
 ) -> List[str]:
     """Wrap ``text`` so every line fits in ``width`` terminal columns.
 
@@ -617,6 +778,13 @@ def wrap(
     :param ansi_reflow: close active ANSI styling (SGR colors/attributes and
         OSC 8 links) at the end of each line and re-open it at the start of
         the next one, after the indent, so every line stands on its own.
+    :param ruby: recognize ruby notation (``｜漢字《かんじ》`` / ``漢字《かんじ》``,
+        青空文庫・なろう形式). The base text and its ruby form one unbreakable
+        unit; kinsoku still applies around it.
+    :param ruby_width: how a ruby unit is measured when ``ruby=True``:
+        ``"full"`` (default) counts the notation as displayed, including
+        ``｜《》`` and the annotation; ``"base"`` counts only the base text
+        (for output that is later rendered as real ruby).
     """
     rules = _resolve_rules(rules)
     if width < 1:
@@ -629,13 +797,15 @@ def wrap(
         raise ValueError("indent is as wide as or wider than width")
     if max_lines is not None and max_lines < 1:
         raise ValueError("max_lines must be >= 1")
+    if ruby_width not in _RUBY_WIDTHS:
+        raise ValueError("ruby_width must be 'base' or 'full'")
 
     # (indent, body) pairs; the indent stays outside any re-opened styling
     pairs: List[tuple] = []
     for line in text.splitlines() or [""]:
         wrapped = _wrap_line(
             line, width - iw, width - sw, hanging, break_long_words, keep_all,
-            ambiguous_width, rules, ansi_reflow,
+            ambiguous_width, rules, ansi_reflow, ruby, ruby_width,
         )
         pairs.append((initial_indent if wrapped[0] else "", wrapped[0]))
         pairs.extend((subsequent_indent, l) for l in wrapped[1:])
@@ -648,7 +818,7 @@ def wrap(
         out = [i + b for i, b in pairs]
         if cut:
             body = _cut_for_placeholder(
-                out[-1], width, placeholder, ambiguous_width, rules
+                out[-1], width, placeholder, ambiguous_width, rules, ruby, ruby_width
             )
             if "\x1b" in out[-1]:
                 body += "\x1b[0m"
@@ -662,7 +832,7 @@ def wrap(
             start = state.copy()
             line = indent + (start.open() if body else "") + body
             kept = _cut_for_placeholder(
-                line, width, placeholder, ambiguous_width, rules
+                line, width, placeholder, ambiguous_width, rules, ruby, ruby_width
             )
             if len(kept) < len(indent):  # the cut ate into the indent
                 end = _AnsiState()
@@ -677,20 +847,28 @@ def wrap(
 
 
 def _cut_for_placeholder(
-    line: str, width_: int, placeholder: str, aw: int, rules: KinsokuRules = _JA
+    line: str,
+    width_: int,
+    placeholder: str,
+    aw: int,
+    rules: KinsokuRules = _JA,
+    ruby: bool = False,
+    ruby_width: str = "full",
 ) -> str:
     """Cut ``line`` so that ``placeholder`` can follow it within ``width_``."""
     pw = _w(placeholder, aw)
     if pw > width_:
         raise ValueError("placeholder is wider than width")
-    cls = list(_clusters(line))
-    while cls and (
-        _w("".join(cls), aw) + pw > width_
-        or _first(cls[-1]) in _SPACES
-        or _first(placeholder) in rules.no_start and _first(cls[-1]) in rules.no_end
+    pieces = list(_pieces(line, aw, ruby, ruby_width))
+    total = sum(w for _, w in pieces)
+    while pieces and (
+        total + pw > width_
+        or _first(pieces[-1][0]) in _SPACES
+        or _first(placeholder) in rules.no_start
+        and _first(pieces[-1][0]) in rules.no_end
     ):
-        cls.pop()
-    return "".join(cls)
+        total -= pieces.pop()[1]
+    return "".join(c for c, _ in pieces)
 
 
 def fill(text: str, width: int = 70, **kwargs) -> str:
