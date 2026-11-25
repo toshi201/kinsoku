@@ -78,6 +78,7 @@ kinsoku --truncate -w 20 list.txt   # 各行を…で切り詰め
 kinsoku --width-of file.txt          # 各行の表示幅を出力
 kinsoku -w 40 -i "　" novel.txt      # 段落頭を全角スペースで字下げ
 kinsoku -w 40 -n 3 summary.txt       # 3行まで
+kinsoku -w 40 --rules zh-hans cn.txt # 中国語（簡体字）の禁則で折り返す
 ```
 
 ## textwrap からの移行
@@ -141,6 +142,33 @@ print(kinsoku.tategaki("令和8年12月25日", 5, halfwidth="pair"))   # 縦中�
 - 禁則：`。」ャ` などは列頭に、`「（` などは列末に来ないよう前後の文字を次の列へ追い出します。`hanging=True`（既定）では `、。，．` を列の下に1マスぶら下げ、そのときは全列が `height + 1` 行になります
 - 結合文字・ゼロ幅文字は直前のマスに付け、ANSI エスケープ（色）は取り除きます
 - CLI: `kinsoku --tategaki 10 [--gap 2] novel.txt`
+### 言語別の禁則ルール
+
+`rules` 引数（CLI は `--rules`）で禁則ルールのプリセットを切り替えられます。
+
+| プリセット | 内容 |
+| --- | --- |
+| `ja`（既定） | 日本語。`NO_START` / `NO_END` / `HANGABLE` そのもの |
+| `strict` | JIS X 4051 寄りの厳格な禁則。小書きの仮名・`ー`・`々` などの繰り返し記号も行頭禁則（現状 `ja` と同じ） |
+| `loose` | CSS の `line-break: loose` 相当。小書きの仮名・`ー`・`々ゝヽ`・`〜` などが行頭に来てもよい |
+| `zh-hans` | 中国語（簡体字）。`，。！？；：、…` `”’）》】` などが行頭禁則、`“‘（《【` などが行末禁則 |
+| `zh-hant` | 中国語（繁体字）。`zh-hans` の規則（`「」『』` を含む）に加えて、小型の句読点 `﹐﹑﹒﹔﹕﹖﹗` などに対応 |
+| `ko` | 韓国語。閉じ括弧・句読点（`.,!?)]}` を含む）が行頭禁則、開き括弧が行末禁則。仮名の規則はなし |
+
+```python
+kinsoku.wrap("あいッう", 4)                  # => ['あ', 'いッ', 'う']
+kinsoku.wrap("あいッう", 4, rules="loose")   # => ['あい', 'ッう']
+kinsoku.wrap("他说：“你好，世界。”", 8, rules="zh-hans")
+# => ['他说：', '“你好，', '世界。”']
+
+# 独自ルール: プリセットをもとに一部だけ変える（dataclasses.replace と同じ）
+from kinsoku import KinsokuRules
+ja = KinsokuRules.preset("ja")
+rules = ja.replace(no_start=ja.no_start - {"ー"})   # 「ー」の行頭を許す
+kinsoku.wrap("あいーう", 4, rules=rules)       # => ['あい', 'ーう']
+```
+
+`KinsokuRules(no_start=..., no_end=..., hangable=...)` は frozen な dataclass で、各フィールドには文字列などの文字の集まりを渡せます（`frozenset` に変換されます）。プリセットの一覧は `kinsoku.PRESETS` です。
 
 ## 仕様
 
@@ -180,9 +208,13 @@ applies Japanese line-breaking rules:
 - `tategaki(text, height)`: vertical (top-to-bottom, right-to-left) layout for
   terminals with vertical presentation forms, kinsoku and hanging punctuation
   (CLI: `--tategaki HEIGHT`)
+- `rules=` selects a kinsoku preset (`ja` (default), `strict`, `loose`,
+  `zh-hans`, `zh-hant`, `ko`; CLI `--rules`) or takes a custom
+  `KinsokuRules(no_start, no_end, hangable)`, e.g.
+  `KinsokuRules.preset("ja").replace(...)`
 
 API: `width`, `char_width`, `strip_ansi`, `wrap`, `fill`, `shorten`, `truncate`, `pad`,
-`KinsokuWrapper`, `dedent`, `indent`.
+`KinsokuWrapper`, `dedent`, `indent`, `tategaki`, `KinsokuRules`, `PRESETS`.
 CLI: `kinsoku -w N [FILE...]`.
 
 License: MIT

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import re
 import unicodedata
+import dataclasses
 from dataclasses import dataclass
 from functools import lru_cache
 from itertools import repeat
-from typing import Iterator, List, Optional
+from types import MappingProxyType
+from typing import FrozenSet, Iterable, Iterator, List, Mapping, Optional, Union
 
 # 行頭禁則: characters that must not start a line.
 NO_START = frozenset(
@@ -22,6 +24,105 @@ NO_END = frozenset("(（[［{｛〔〈《「『【〘〖〝‘“｟«")
 
 # ぶら下げ可能: punctuation allowed to hang past the right margin.
 HANGABLE = frozenset("、。，．,.")
+
+
+@dataclass(frozen=True)
+class KinsokuRules:
+    """A set of line-breaking (kinsoku) rules.
+
+    :param no_start: characters that must not start a line (行頭禁則).
+    :param no_end: characters that must not end a line (行末禁則).
+    :param hangable: punctuation allowed to hang past the margin with
+        ``hanging=True`` (ぶら下げ).
+
+    Any iterable of characters (including a plain ``str``) is accepted and
+    converted to a ``frozenset``. To customize a preset, use
+    :meth:`preset` + :meth:`replace` (equivalent to
+    :func:`dataclasses.replace`)::
+
+        rules = KinsokuRules.preset("ja")
+        rules = rules.replace(no_start=rules.no_start - {"ー"})
+    """
+
+    no_start: FrozenSet[str] = frozenset()
+    no_end: FrozenSet[str] = frozenset()
+    hangable: FrozenSet[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        for name in ("no_start", "no_end", "hangable"):
+            value = getattr(self, name)
+            if isinstance(value, str) or not isinstance(value, frozenset):
+                object.__setattr__(self, name, frozenset(value))
+
+    @classmethod
+    def preset(cls, name: str) -> "KinsokuRules":
+        """Return the built-in preset called ``name`` (see :data:`PRESETS`)."""
+        try:
+            return PRESETS[name]
+        except (KeyError, TypeError):
+            valid = ", ".join(PRESETS)
+            raise ValueError(
+                f"unknown rules preset {name!r} (valid: {valid})"
+            ) from None
+
+    def replace(self, **changes: Iterable[str]) -> "KinsokuRules":
+        """Return a copy with some fields replaced (like :func:`dataclasses.replace`)."""
+        return dataclasses.replace(self, **changes)
+
+
+_SMALL_KANA = (
+    "ァィゥェォッャュョヮヵヶぁぃぅぇぉっゃゅょゎゕゖ"
+    "ㇰㇱㇲㇳㇴㇵㇶㇷㇸㇹㇺㇻㇼㇽㇾㇿ"
+)
+# Characters that CSS ``line-break: loose`` lets start a line: small kana,
+# the prolonged sound mark, iteration marks and hyphen-like characters.
+_LOOSE_ALLOWED = frozenset(_SMALL_KANA + "ー々〻ゝゞヽヾ‐゠–〜～")
+
+_ZH_NO_START = (
+    "，。、．！？；：…‥·・"
+    "”’」』）》〉】〗〕］｝〙〛｠"
+    ",.!?;:)]}%％"
+)
+_ZH_NO_END = "“‘「『（《〈【〖〔［｛〘〚｟([{"
+_ZH_HANGABLE = "，。、．,."
+
+PRESETS: Mapping[str, KinsokuRules] = MappingProxyType({
+    # Japanese (default): exactly NO_START / NO_END / HANGABLE.
+    "ja": KinsokuRules(NO_START, NO_END, HANGABLE),
+    # JIS X 4051-like: small kana, ー and iteration marks never start a line
+    # (the "ja" rules already follow this).
+    "strict": KinsokuRules(NO_START, NO_END, HANGABLE),
+    # CSS ``line-break: loose``-like: small kana, ー, 々 etc. may start a line.
+    "loose": KinsokuRules(NO_START - _LOOSE_ALLOWED, NO_END, HANGABLE),
+    # Simplified Chinese.
+    "zh-hans": KinsokuRules(_ZH_NO_START, _ZH_NO_END, _ZH_HANGABLE),
+    # Traditional Chinese: plus the small form variants (﹐﹑﹒ ...).
+    "zh-hant": KinsokuRules(
+        _ZH_NO_START + "﹐﹑﹒﹔﹕﹖﹗﹚﹜﹞",
+        _ZH_NO_END + "﹙﹛﹝",
+        _ZH_HANGABLE + "﹐﹑﹒",
+    ),
+    # Korean: closing punctuation/brackets (Western and CJK); no kana rules.
+    "ko": KinsokuRules(
+        ".,!?;:)]}…%’”」』）》〉】〕］｝〙〗。、，．！？；：％",
+        "([{‘“「『（《〈【〔［｛〘〖",
+        ".,，．。、",
+    ),
+})
+
+_JA = PRESETS["ja"]
+
+RulesLike = Union[str, KinsokuRules]
+
+
+def _resolve_rules(rules: RulesLike) -> KinsokuRules:
+    if isinstance(rules, KinsokuRules):
+        return rules
+    if isinstance(rules, str):
+        return KinsokuRules.preset(rules)
+    raise TypeError(
+        f"rules must be a preset name or KinsokuRules, not {type(rules).__name__}"
+    )
 
 _SPACES = frozenset(" \t　")
 
@@ -169,13 +270,20 @@ class _Unit:
     hang: int = 0  # width of trailing hangable punctuation
 
 
-def _atoms(text: str, ambiguous_width: int, keep_all: bool = False) -> List[_Unit]:
+def _atoms(
+    text: str,
+    ambiguous_width: int,
+    keep_all: bool = False,
+    rules: KinsokuRules = _JA,
+) -> List[_Unit]:
     """Split text into atoms: spaces, word runs, single wide clusters."""
     atoms: List[_Unit] = []
     word: List[str] = []  # clusters of the current word run
     word_w = 0
     append = atoms.append
     cw = _char_width
+    no_start = rules.no_start
+    no_end = rules.no_end
 
     for cl in _clusters(text):
         # The width of a word run is the sum of its cluster widths, so each
@@ -192,7 +300,7 @@ def _atoms(text: str, ambiguous_width: int, keep_all: bool = False) -> List[_Uni
                 append(_Unit("".join(word), word_w))
                 word, word_w = [], 0
             append(_Unit(cl, w or 1, space=True))
-        elif b and not keep_all and (bw >= 2 or b in NO_START or b in NO_END):
+        elif b and not keep_all and (bw >= 2 or b in no_start or b in no_end):
             if word:
                 append(_Unit("".join(word), word_w))
                 word, word_w = [], 0
@@ -205,13 +313,20 @@ def _atoms(text: str, ambiguous_width: int, keep_all: bool = False) -> List[_Uni
     return atoms
 
 
-def _glue(atoms: List[_Unit], hanging: bool, ambiguous_width: int) -> List[_Unit]:
+def _glue(
+    atoms: List[_Unit],
+    hanging: bool,
+    ambiguous_width: int,
+    rules: KinsokuRules = _JA,
+) -> List[_Unit]:
     """Merge atoms that must not be separated according to kinsoku rules."""
     units: List[_Unit] = []
+    no_start = rules.no_start
+    no_end = rules.no_end
     for a in atoms:
         if units and not a.space and not units[-1].space:
             prev = units[-1]
-            if _first(a.text) in NO_START or _last(prev.text) in NO_END:
+            if _first(a.text) in no_start or _last(prev.text) in no_end:
                 prev.text += a.text
                 prev.width += a.width
                 continue
@@ -222,7 +337,7 @@ def _glue(atoms: List[_Unit], hanging: bool, ambiguous_width: int) -> List[_Unit
                 continue
             h = 0
             for ch in reversed(strip_ansi(u.text)):
-                if ch in HANGABLE:
+                if ch in rules.hangable:
                     h += char_width(ch, ambiguous_width)
                 else:
                     break
@@ -231,14 +346,19 @@ def _glue(atoms: List[_Unit], hanging: bool, ambiguous_width: int) -> List[_Unit
     return units
 
 
-def _split_long(u: _Unit, limit: int, ambiguous_width: int) -> List[_Unit]:
+def _split_long(
+    u: _Unit, limit: int, ambiguous_width: int, rules: KinsokuRules = _JA
+) -> List[_Unit]:
     """Hard-split an over-long unit into chunks no wider than ``limit``."""
     cls = list(_clusters(u.text))
     ws = [width(c, ambiguous_width) for c in cls]
 
     def good_break(i: int) -> bool:
         # breaking before cls[i] respects kinsoku
-        return _first(cls[i]) not in NO_START and _last(cls[i - 1]) not in NO_END
+        return (
+            _first(cls[i]) not in rules.no_start
+            and _last(cls[i - 1]) not in rules.no_end
+        )
 
     chunks: List[_Unit] = []
     start = 0
@@ -267,8 +387,11 @@ def _wrap_line(
     break_long_words: bool,
     keep_all: bool,
     ambiguous_width: int,
+    rules: KinsokuRules = _JA,
 ) -> List[str]:
-    units = _glue(_atoms(line, ambiguous_width, keep_all), hanging, ambiguous_width)
+    units = _glue(
+        _atoms(line, ambiguous_width, keep_all, rules), hanging, ambiguous_width, rules
+    )
     lines: List[str] = []
     cur: List[_Unit] = []
     cur_w = 0
@@ -297,7 +420,7 @@ def _wrap_line(
             flush()
         if break_long_words:
             while u.width - u.hang > limit():
-                pieces = _split_long(u, limit(), ambiguous_width)
+                pieces = _split_long(u, limit(), ambiguous_width, rules)
                 if len(pieces) < 2:
                     break
                 lines.append(pieces[0].text)
@@ -325,6 +448,7 @@ def wrap(
     max_lines: Optional[int] = None,
     placeholder: str = "…",
     ambiguous_width: int = 1,
+    rules: RulesLike = "ja",
 ) -> List[str]:
     """Wrap ``text`` so every line fits in ``width`` terminal columns.
 
@@ -344,7 +468,11 @@ def wrap(
     :param max_lines: keep at most this many lines; if text is cut, the last
         line ends with ``placeholder``.
     :param ambiguous_width: width of East Asian Ambiguous characters (1 or 2).
+    :param rules: kinsoku rules: a preset name (``"ja"`` (default),
+        ``"strict"``, ``"loose"``, ``"zh-hans"``, ``"zh-hant"``, ``"ko"``)
+        or a :class:`KinsokuRules` instance.
     """
+    rules = _resolve_rules(rules)
     if width < 1:
         raise ValueError(f"invalid width {width!r} (must be > 0)")
     if ambiguous_width not in (1, 2):
@@ -360,18 +488,22 @@ def wrap(
     for line in text.splitlines() or [""]:
         wrapped = _wrap_line(
             line, width - iw, width - sw, hanging, break_long_words, keep_all,
-            ambiguous_width,
+            ambiguous_width, rules,
         )
         out.append(initial_indent + wrapped[0] if wrapped[0] else wrapped[0])
         out.extend(subsequent_indent + l for l in wrapped[1:])
 
     if max_lines is not None and len(out) > max_lines:
         out = out[:max_lines]
-        out[-1] = _with_placeholder(out[-1], width, placeholder, ambiguous_width)
+        out[-1] = _with_placeholder(
+            out[-1], width, placeholder, ambiguous_width, rules
+        )
     return out
 
 
-def _with_placeholder(line: str, width_: int, placeholder: str, aw: int) -> str:
+def _with_placeholder(
+    line: str, width_: int, placeholder: str, aw: int, rules: KinsokuRules = _JA
+) -> str:
     pw = _w(placeholder, aw)
     if pw > width_:
         raise ValueError("placeholder is wider than width")
@@ -379,7 +511,7 @@ def _with_placeholder(line: str, width_: int, placeholder: str, aw: int) -> str:
     while cls and (
         _w("".join(cls), aw) + pw > width_
         or _first(cls[-1]) in _SPACES
-        or _first(placeholder) in NO_START and _first(cls[-1]) in NO_END
+        or _first(placeholder) in rules.no_start and _first(cls[-1]) in rules.no_end
     ):
         cls.pop()
     body = "".join(cls)
