@@ -13,6 +13,7 @@ from ._core import (
     width,
     wrap,
 )
+from .wrapper import KinsokuWrapper, dedent, indent
 
 __all__ = [
     "HANGABLE",
@@ -26,5 +27,8 @@ __all__ = [
     "truncate",
     "width",
     "wrap",
+    "KinsokuWrapper",
+    "dedent",
+    "indent",
 ]
 __version__ = "0.2.0"

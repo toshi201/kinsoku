@@ -80,6 +80,32 @@ kinsoku -w 40 -i "　" novel.txt      # 段落頭を全角スペースで字下�
 kinsoku -w 40 -n 3 summary.txt       # 3行まで
 ```
 
+## textwrap からの移行
+
+`kinsoku.KinsokuWrapper` は `textwrap.TextWrapper` と同じ引数を受け付ける置き換え用クラスです。
+`dedent` / `indent` も `kinsoku` から使えます（`textwrap` のものをそのまま再エクスポート）。
+
+```python
+# before
+import textwrap
+w = textwrap.TextWrapper(width=40, subsequent_indent="  ")
+print(w.fill(text))
+print(textwrap.indent(textwrap.dedent(doc), "> "))
+
+# after
+import kinsoku
+w = kinsoku.KinsokuWrapper(width=40, subsequent_indent="  ", placeholder="…")
+w.hanging = True                       # 属性は後から変更できる
+print(w.fill(text))
+print(kinsoku.indent(kinsoku.dedent(doc), "> "))
+```
+
+- `placeholder` の既定値は互換性のため textwrap と同じ `" [...]"`。日本語には `"…"` がおすすめ
+- `expand_tabs` / `tabsize` は表示幅で計算（全角は2桁）
+- `replace_whitespace=True`（既定）では textwrap と同様に改行も空白に置き換わるため、改行は段落区切りになりません。段落を保ちたいときは `replace_whitespace=False`
+- 区切り位置の空白は常に削除されます（`drop_whitespace=False` は無効）。`fix_sentence_endings` / `break_on_hyphens` は受け付けますが無視します
+- `hanging` / `keep_all` / `ambiguous_width` などの kinsoku 独自オプションはキーワード引数で指定できます
+
 ## 仕様
 
 - **行頭禁則**: `、。，．）」』】ー` 小書きの仮名 `ぁぃぅっゃ` `ァィゥッャ` `…・：；々` など
@@ -112,8 +138,12 @@ applies Japanese line-breaking rules:
 - ANSI escape sequences (colors, OSC 8 links) are zero-width and never split
 - `initial_indent` / `subsequent_indent`, `max_lines` + `placeholder`
 - `keep_all=True` breaks only at spaces (good for Korean)
+- `KinsokuWrapper`: a drop-in replacement for `textwrap.TextWrapper` (same
+  constructor arguments, mutable attributes, `.wrap()` / `.fill()`); `dedent`
+  and `indent` are re-exported from `textwrap`
 
-API: `width`, `char_width`, `strip_ansi`, `wrap`, `fill`, `shorten`, `truncate`, `pad`.
+API: `width`, `char_width`, `strip_ansi`, `wrap`, `fill`, `shorten`, `truncate`, `pad`,
+`KinsokuWrapper`, `dedent`, `indent`.
 CLI: `kinsoku -w N [FILE...]`.
 
 License: MIT
