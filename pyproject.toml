@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kinsoku"
+version = "0.1.0"
+description = "Japanese/CJK-aware text wrapping with kinsoku shori (禁則処理) and display-width support"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+keywords = ["japanese", "cjk", "textwrap", "kinsoku", "east-asian-width", "terminal"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Natural Language :: Japanese",
+    "Topic :: Text Processing :: Linguistic",
+    "Environment :: Console",
+]
+dependencies = []
+
+[project.scripts]
+kinsoku = "kinsoku.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
