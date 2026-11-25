@@ -98,8 +98,6 @@ pip install -e . pytest
 pytest
 ```
 
-Issue / PR 大歓迎です！
-
 ---
 
 ## English
