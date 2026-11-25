@@ -49,6 +49,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                    help="kinsoku rules preset (default: ja)")
     p.add_argument("--ansi-reflow", action="store_true",
                    help="close ANSI colors/links at each line end and reopen them on the next line")
+    p.add_argument("--ruby", action="store_true",
+                   help="keep ruby notation (｜漢字《かんじ》) unbroken")
+    p.add_argument("--ruby-width", choices=("base", "full"), default="full",
+                   help="with --ruby: count only the base text (base) or the "
+                        "whole notation (full, default)")
     p.add_argument("--truncate", action="store_true",
                    help="truncate each line with … instead of wrapping")
     p.add_argument("--width-of", action="store_true",
@@ -145,6 +150,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         ambiguous_width=args.ambiguous_width,
         rules=args.rules,
         ansi_reflow=args.ansi_reflow,
+        ruby=args.ruby,
+        ruby_width=args.ruby_width,
         )
     except ValueError as e:
         p.error(str(e))
