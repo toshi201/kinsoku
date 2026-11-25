@@ -142,6 +142,7 @@ print(kinsoku.tategaki("令和8年12月25日", 5, halfwidth="pair"))   # 縦中�
 - 禁則：`。」ャ` などは列頭に、`「（` などは列末に来ないよう前後の文字を次の列へ追い出します。`hanging=True`（既定）では `、。，．` を列の下に1マスぶら下げ、そのときは全列が `height + 1` 行になります
 - 結合文字・ゼロ幅文字は直前のマスに付け、ANSI エスケープ（色）は取り除きます
 - CLI: `kinsoku --tategaki 10 [--gap 2] novel.txt`
+
 ### 言語別の禁則ルール
 
 `rules` 引数（CLI は `--rules`）で禁則ルールのプリセットを切り替えられます。
@@ -169,6 +170,21 @@ kinsoku.wrap("あいーう", 4, rules=rules)       # => ['あい', 'ーう']
 ```
 
 `KinsokuRules(no_start=..., no_end=..., hangable=...)` は frozen な dataclass で、各フィールドには文字列などの文字の集まりを渡せます（`frozenset` に変換されます）。プリセットの一覧は `kinsoku.PRESETS` です。
+
+### 色を行ごとに閉じる（ansi_reflow）
+
+`ansi_reflow=True` にすると、色や装飾（SGR）・OSC 8 ハイパーリンクが有効なまま終わる行の末尾で
+いったん閉じ（`\x1b[0m` / `\x1b]8;;\x1b\\`）、次の行の先頭で同じ状態を開き直します。
+表のセルや1行ずつパディングして表示する場合でも、色がずれたり背景がはみ出したりしません。
+インデントはスタイルの外側に置かれ、装飾のない行はそのままです。
+
+```python
+>>> wrap("\x1b[31mあいうえおか\x1b[0m", 6, ansi_reflow=True)
+['\x1b[31mあいう\x1b[0m', '\x1b[31mえおか\x1b[0m']
+>>> from kinsoku import ansi_reflow   # 折り返し済みの行リストにも使える
+```
+
+CLI では `--ansi-reflow`。
 
 ## 仕様
 
@@ -212,9 +228,11 @@ applies Japanese line-breaking rules:
   `zh-hans`, `zh-hant`, `ko`; CLI `--rules`) or takes a custom
   `KinsokuRules(no_start, no_end, hangable)`, e.g.
   `KinsokuRules.preset("ja").replace(...)`
+- `ansi_reflow=True` closes active colors / OSC 8 links at each line end and
+  reopens them on the next line (also `ansi_reflow(lines)`, CLI `--ansi-reflow`)
 
 API: `width`, `char_width`, `strip_ansi`, `wrap`, `fill`, `shorten`, `truncate`, `pad`,
-`KinsokuWrapper`, `dedent`, `indent`, `tategaki`, `KinsokuRules`, `PRESETS`.
+`KinsokuWrapper`, `dedent`, `indent`, `tategaki`, `KinsokuRules`, `PRESETS`, `ansi_reflow`.
 CLI: `kinsoku -w N [FILE...]`.
 
 License: MIT

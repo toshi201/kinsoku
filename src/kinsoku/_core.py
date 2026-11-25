@@ -139,6 +139,135 @@ def strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text)
 
 
+# --- ANSI state tracking (ansi_reflow) ---------------------------------------
+
+_SGR_RE = re.compile(r"\x1b\[([0-9:;]*)m")
+_OSC8_RE = re.compile(r"\x1b\]8;([^;\x07\x1b]*);([^\x07\x1b]*)(\x07|\x1b\\)")
+
+# simple on/off attributes: slot -> (codes that set it, codes that clear it)
+_ATTR_ON = {1: "bold", 2: "dim", 3: "italic", 4: "underline", 21: "underline",
+            5: "blink", 6: "blink", 7: "inverse", 8: "hidden", 9: "strike",
+            53: "overline"}
+_ATTR_OFF = {22: ("bold", "dim"), 23: ("italic",), 24: ("underline",),
+             25: ("blink",), 27: ("inverse",), 28: ("hidden",),
+             29: ("strike",), 55: ("overline",)}
+_SLOTS = ("bold", "dim", "italic", "underline", "blink", "inverse", "hidden",
+          "strike", "overline", "fg", "bg", "ulcolor")
+_COLOR_SLOT = {38: "fg", 48: "bg", 58: "ulcolor"}
+
+
+class _AnsiState:
+    """Tracks the SGR attributes and the OSC 8 hyperlink active in a stream."""
+
+    def __init__(self) -> None:
+        self.sgr: dict = {}
+        self.link: Optional[tuple] = None  # (params, uri, terminator)
+
+    def feed(self, seq: str) -> None:
+        """Update the state with one escape sequence (others are ignored)."""
+        m = _SGR_RE.fullmatch(seq)
+        if m:
+            self._sgr(m.group(1))
+            return
+        m = _OSC8_RE.fullmatch(seq)
+        if m:
+            params, uri, term = m.groups()
+            self.link = (params, uri, term) if uri else None
+
+    def feed_text(self, text: str) -> None:
+        if "\x1b" in text:
+            for m in _ANSI_RE.finditer(text):
+                self.feed(m.group())
+
+    def _sgr(self, body: str) -> None:
+        ps = body.split(";")
+        st = self.sgr
+        i = 0
+        while i < len(ps):
+            p = ps[i]
+            i += 1
+            if ":" in p:  # colon sub-parameters, e.g. 38:2::r:g:b or 4:3
+                head = p.split(":", 1)[0]
+                h = int(head) if head.isdigit() else -1
+                if h in _COLOR_SLOT:
+                    st[_COLOR_SLOT[h]] = p
+                elif h == 4:
+                    if p.split(":")[1] in ("", "0"):
+                        st.pop("underline", None)
+                    else:
+                        st["underline"] = p
+                continue
+            c = int(p) if p else 0
+            if c == 0:
+                st.clear()
+            elif c in _ATTR_ON:
+                st[_ATTR_ON[c]] = str(c)
+            elif c in _ATTR_OFF:
+                for slot in _ATTR_OFF[c]:
+                    st.pop(slot, None)
+            elif 30 <= c <= 37 or 90 <= c <= 97:
+                st["fg"] = str(c)
+            elif 40 <= c <= 47 or 100 <= c <= 107:
+                st["bg"] = str(c)
+            elif c in (39, 49, 59):
+                st.pop({39: "fg", 49: "bg", 59: "ulcolor"}[c], None)
+            elif c in _COLOR_SLOT:
+                mode = ps[i] if i < len(ps) else ""
+                n = 2 if mode == "5" else 4 if mode == "2" else 0
+                if n == 0 or i + n > len(ps):
+                    return  # malformed: ignore the rest of the sequence
+                st[_COLOR_SLOT[c]] = ";".join([str(c)] + ps[i:i + n])
+                i += n
+
+    def active(self) -> bool:
+        return bool(self.sgr) or self.link is not None
+
+    def open(self) -> str:
+        """Minimal sequence that re-establishes this state from the default."""
+        out = ""
+        if self.sgr:
+            out = "\x1b[" + ";".join(self.sgr[k] for k in _SLOTS if k in self.sgr) + "m"
+        if self.link:
+            params, uri, term = self.link
+            out += f"\x1b]8;{params};{uri}{term}"
+        return out
+
+    def close(self) -> str:
+        """Sequence that returns the terminal to the default state."""
+        out = ""
+        if self.link:
+            out += f"\x1b]8;;{self.link[2]}"
+        if self.sgr:
+            out += "\x1b[0m"
+        return out
+
+    def copy(self) -> "_AnsiState":
+        c = _AnsiState()
+        c.sgr = dict(self.sgr)
+        c.link = self.link
+        return c
+
+
+def _reflow_body(body: str, state: _AnsiState) -> str:
+    """Re-open ``state`` before ``body``, update it, close it at the end."""
+    if not body:
+        return body
+    prefix = state.open()
+    state.feed_text(body)
+    return prefix + body + state.close()
+
+
+def ansi_reflow(lines: List[str]) -> List[str]:
+    """Make each line self-contained with respect to ANSI styling.
+
+    Lines that end with active SGR attributes (colors, bold, ...) or an open
+    OSC 8 hyperlink get them closed at the end, and the next line re-opens
+    the same state at its start. Lines without active styling are unchanged.
+    """
+    state = _AnsiState()
+    return [_reflow_body(line, state) for line in lines]
+
+
 def char_width(ch: str, ambiguous_width: int = 1) -> int:
     """Return the terminal display width (0, 1 or 2) of a single character."""
     if not ch:
@@ -388,6 +517,7 @@ def _wrap_line(
     keep_all: bool,
     ambiguous_width: int,
     rules: KinsokuRules = _JA,
+    keep_escapes: bool = False,
 ) -> List[str]:
     units = _glue(
         _atoms(line, ambiguous_width, keep_all, rules), hanging, ambiguous_width, rules
@@ -395,15 +525,20 @@ def _wrap_line(
     lines: List[str] = []
     cur: List[_Unit] = []
     cur_w = 0
+    pending = ""  # escapes of dropped leading spaces (keep_escapes only)
 
     def limit() -> int:
         return rest_width if lines else first_width
 
+    def escapes(t: str) -> str:
+        return "".join(_ANSI_RE.findall(t)) if keep_escapes and "\x1b" in t else ""
+
     def flush() -> None:
         nonlocal cur, cur_w
+        dropped = ""
         while cur and cur[-1].space:
-            cur.pop()
-        lines.append("".join(u.text for u in cur))
+            dropped = escapes(cur.pop().text) + dropped
+        lines.append("".join(u.text for u in cur) + dropped)
         cur, cur_w = [], 0
 
     for u in units:
@@ -411,7 +546,12 @@ def _wrap_line(
             if cur:
                 cur.append(u)
                 cur_w += u.width
+            else:
+                pending += escapes(u.text)
             continue
+        if pending:
+            u = _Unit(pending + u.text, u.width, hang=u.hang)
+            pending = ""
         if cur_w + u.width - u.hang <= limit():
             cur.append(u)
             cur_w += u.width
@@ -433,6 +573,8 @@ def _wrap_line(
         cur_w = u.width
     if cur or not lines:
         flush()
+    if pending:
+        lines[-1] += pending
     return lines
 
 
@@ -449,6 +591,7 @@ def wrap(
     placeholder: str = "…",
     ambiguous_width: int = 1,
     rules: RulesLike = "ja",
+    ansi_reflow: bool = False,
 ) -> List[str]:
     """Wrap ``text`` so every line fits in ``width`` terminal columns.
 
@@ -471,6 +614,9 @@ def wrap(
     :param rules: kinsoku rules: a preset name (``"ja"`` (default),
         ``"strict"``, ``"loose"``, ``"zh-hans"``, ``"zh-hant"``, ``"ko"``)
         or a :class:`KinsokuRules` instance.
+    :param ansi_reflow: close active ANSI styling (SGR colors/attributes and
+        OSC 8 links) at the end of each line and re-open it at the start of
+        the next one, after the indent, so every line stands on its own.
     """
     rules = _resolve_rules(rules)
     if width < 1:
@@ -484,26 +630,56 @@ def wrap(
     if max_lines is not None and max_lines < 1:
         raise ValueError("max_lines must be >= 1")
 
-    out: List[str] = []
+    # (indent, body) pairs; the indent stays outside any re-opened styling
+    pairs: List[tuple] = []
     for line in text.splitlines() or [""]:
         wrapped = _wrap_line(
             line, width - iw, width - sw, hanging, break_long_words, keep_all,
-            ambiguous_width, rules,
+            ambiguous_width, rules, ansi_reflow,
         )
-        out.append(initial_indent + wrapped[0] if wrapped[0] else wrapped[0])
-        out.extend(subsequent_indent + l for l in wrapped[1:])
+        pairs.append((initial_indent if wrapped[0] else "", wrapped[0]))
+        pairs.extend((subsequent_indent, l) for l in wrapped[1:])
 
-    if max_lines is not None and len(out) > max_lines:
-        out = out[:max_lines]
-        out[-1] = _with_placeholder(
-            out[-1], width, placeholder, ambiguous_width, rules
-        )
+    cut = max_lines is not None and len(pairs) > max_lines
+    if cut:
+        pairs = pairs[:max_lines]
+
+    if not ansi_reflow:
+        out = [i + b for i, b in pairs]
+        if cut:
+            body = _cut_for_placeholder(
+                out[-1], width, placeholder, ambiguous_width, rules
+            )
+            if "\x1b" in out[-1]:
+                body += "\x1b[0m"
+            out[-1] = body + placeholder
+        return out
+
+    state = _AnsiState()
+    out = []
+    for k, (indent, body) in enumerate(pairs):
+        if cut and k == len(pairs) - 1:
+            start = state.copy()
+            line = indent + (start.open() if body else "") + body
+            kept = _cut_for_placeholder(
+                line, width, placeholder, ambiguous_width, rules
+            )
+            if len(kept) < len(indent):  # the cut ate into the indent
+                end = _AnsiState()
+                end.feed_text(kept)
+            else:
+                end = start
+                end.feed_text(kept[len(indent):])
+            out.append(kept + end.close() + placeholder)
+        else:
+            out.append(indent + _reflow_body(body, state))
     return out
 
 
-def _with_placeholder(
+def _cut_for_placeholder(
     line: str, width_: int, placeholder: str, aw: int, rules: KinsokuRules = _JA
 ) -> str:
+    """Cut ``line`` so that ``placeholder`` can follow it within ``width_``."""
     pw = _w(placeholder, aw)
     if pw > width_:
         raise ValueError("placeholder is wider than width")
@@ -514,10 +690,7 @@ def _with_placeholder(
         or _first(placeholder) in rules.no_start and _first(cls[-1]) in rules.no_end
     ):
         cls.pop()
-    body = "".join(cls)
-    if "\x1b" in line:
-        body += "\x1b[0m"
-    return body + placeholder
+    return "".join(cls)
 
 
 def fill(text: str, width: int = 70, **kwargs) -> str:
