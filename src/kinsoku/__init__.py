@@ -18,6 +18,7 @@ from ._core import (
 )
 from .tategaki import tategaki
 from .wrapper import KinsokuWrapper, dedent, indent
+from .unwrap import rewrap, unwrap
 
 __all__ = [
     "HANGABLE",
@@ -29,9 +30,11 @@ __all__ = [
     "char_width",
     "fill",
     "pad",
+    "rewrap",
     "shorten",
     "strip_ansi",
     "truncate",
+    "unwrap",
     "width",
     "wrap",
     "KinsokuWrapper",
