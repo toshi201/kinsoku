@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from functools import lru_cache
+from itertools import repeat
 from typing import Iterator, List, Optional
 
 # 行頭禁則: characters that must not start a line.
@@ -40,6 +42,13 @@ def char_width(ch: str, ambiguous_width: int = 1) -> int:
     """Return the terminal display width (0, 1 or 2) of a single character."""
     if not ch:
         return 0
+    if " " <= ch <= "~" and len(ch) == 1:  # printable ASCII fast path
+        return 1
+    return _char_width(ch, ambiguous_width)
+
+
+@lru_cache(maxsize=8192)
+def _char_width(ch: str, ambiguous_width: int) -> int:
     cp = ord(ch)
     # Control characters, zero-width joiners, variation selectors, etc.
     if cp < 0x20 or 0x7F <= cp < 0xA0:
@@ -66,7 +75,9 @@ def width(text: str, ambiguous_width: int = 1) -> int:
     """
     if "\x1b" in text:
         text = strip_ansi(text)
-    return sum(char_width(c, ambiguous_width) for c in text)
+    if text.isascii() and text.isprintable():
+        return len(text)
+    return sum(map(_char_width, text, repeat(ambiguous_width)))
 
 
 def _clusters(text: str) -> Iterator[str]:
@@ -75,6 +86,9 @@ def _clusters(text: str) -> Iterator[str]:
     ANSI escape sequences are kept intact and attached to a neighbouring
     cluster, so they are never split and never counted.
     """
+    if "\x1b" not in text:
+        yield from _clusters_plain(text)
+        return
     buf = ""
     prefix = ""  # escapes seen before any base char of the next cluster
     joiner = False
@@ -105,6 +119,26 @@ def _clusters(text: str) -> Iterator[str]:
         yield buf + prefix
 
 
+def _clusters_plain(text: str) -> Iterator[str]:
+    """:func:`_clusters` for text without escape sequences."""
+    if text.isascii() and text.isprintable():
+        yield from text
+        return
+    cw = _char_width
+    buf = ""
+    joiner = False
+    for ch in text:
+        if buf and (joiner or (cw(ch, 1) == 0 and ch != "\t")):
+            buf += ch
+        else:
+            if buf:
+                yield buf
+            buf = ch
+        joiner = ch == "‍"
+    if buf:
+        yield buf
+
+
 def _base(cl: str) -> str:
     """First visible character of a cluster ("" for a pure escape cluster)."""
     if cl[:1] == "\x1b":
@@ -127,7 +161,7 @@ def _last(text: str) -> str:
     return text[-1:]
 
 
-@dataclass
+@dataclass(slots=True)
 class _Unit:
     text: str
     width: int
@@ -138,27 +172,36 @@ class _Unit:
 def _atoms(text: str, ambiguous_width: int, keep_all: bool = False) -> List[_Unit]:
     """Split text into atoms: spaces, word runs, single wide clusters."""
     atoms: List[_Unit] = []
-    word = ""
-
-    def push_word() -> None:
-        nonlocal word
-        if word:
-            atoms.append(_Unit(word, width(word, ambiguous_width)))
-            word = ""
+    word: List[str] = []  # clusters of the current word run
+    word_w = 0
+    append = atoms.append
+    cw = _char_width
 
     for cl in _clusters(text):
-        b = _base(cl)
-        if b and b in _SPACES:
-            push_word()
-            atoms.append(_Unit(cl, width(cl, ambiguous_width) or 1, space=True))
-        elif b and not keep_all and (
-            _is_wide_cluster(cl, ambiguous_width) or b in NO_START or b in NO_END
-        ):
-            push_word()
-            atoms.append(_Unit(cl, width(cl, ambiguous_width)))
+        # The width of a word run is the sum of its cluster widths, so each
+        # cluster is measured exactly once.
+        if len(cl) == 1:  # the common case: a lone character, no escapes
+            b = cl
+            w = bw = cw(cl, ambiguous_width)
         else:
-            word += cl
-    push_word()
+            b = _base(cl)
+            w = width(cl, ambiguous_width)
+            bw = char_width(b, ambiguous_width) if b else 0
+        if b and b in _SPACES:
+            if word:
+                append(_Unit("".join(word), word_w))
+                word, word_w = [], 0
+            append(_Unit(cl, w or 1, space=True))
+        elif b and not keep_all and (bw >= 2 or b in NO_START or b in NO_END):
+            if word:
+                append(_Unit("".join(word), word_w))
+                word, word_w = [], 0
+            append(_Unit(cl, w))
+        else:
+            word.append(cl)
+            word_w += w
+    if word:
+        append(_Unit("".join(word), word_w))
     return atoms
 
 
@@ -373,13 +416,15 @@ def truncate(
     pw = _w(placeholder, ambiguous_width)
     if pw > width:
         raise ValueError("placeholder is wider than width")
-    buf, bw = "", 0
+    parts: List[str] = []
+    bw = 0
     for cl in _clusters(text):
         cw = _w(cl, ambiguous_width)
         if bw + cw > width - pw:
             break
-        buf += cl
+        parts.append(cl)
         bw += cw
+    buf = "".join(parts)
     if "\x1b" in text:
         buf += "\x1b[0m"
     return buf + placeholder
