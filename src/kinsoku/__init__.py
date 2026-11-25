@@ -19,6 +19,7 @@ from ._core import (
 from .tategaki import tategaki
 from .wrapper import KinsokuWrapper, dedent, indent
 from .unwrap import rewrap, unwrap
+from .table import table
 
 __all__ = [
     "HANGABLE",
@@ -33,6 +34,7 @@ __all__ = [
     "rewrap",
     "shorten",
     "strip_ansi",
+    "table",
     "truncate",
     "unwrap",
     "width",
