@@ -43,6 +43,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                    help="width of East Asian Ambiguous chars (default: 1)")
     p.add_argument("--rules", choices=tuple(PRESETS), default="ja",
                    help="kinsoku rules preset (default: ja)")
+    p.add_argument("--ansi-reflow", action="store_true",
+                   help="close ANSI colors/links at each line end and reopen them on the next line")
     p.add_argument("--truncate", action="store_true",
                    help="truncate each line with … instead of wrapping")
     p.add_argument("--width-of", action="store_true",
@@ -96,6 +98,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         max_lines=args.max_lines,
         ambiguous_width=args.ambiguous_width,
         rules=args.rules,
+        ansi_reflow=args.ansi_reflow,
         )
     except ValueError as e:
         p.error(str(e))
