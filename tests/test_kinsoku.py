@@ -1,6 +1,6 @@
 import pytest
 
-from kinsoku import NO_END, NO_START, fill, pad, truncate, width, wrap
+from kinsoku import NO_END, NO_START, fill, pad, shorten, strip_ansi, truncate, width, wrap
 from kinsoku.cli import main
 
 
@@ -171,3 +171,83 @@ def test_cli_width_of(tmp_path, capsys):
     f.write_text("あa\n", encoding="utf-8")
     main(["--width-of", str(f)])
     assert capsys.readouterr().out == "3\n"
+
+
+# --- v0.2: ANSI ------------------------------------------------------------
+
+RED, RESET = "\x1b[31m", "\x1b[0m"
+
+
+def test_ansi_width_and_strip():
+    s = f"{RED}赤い{RESET}文字"
+    assert width(s) == 8
+    assert strip_ansi(s) == "赤い文字"
+    link = "\x1b]8;;https://example.com\x1b\\リンク\x1b]8;;\x1b\\"
+    assert width(link) == 6
+
+
+def test_ansi_wrap_keeps_sequences_intact():
+    s = f"あい{RED}うえおか{RESET}きく"
+    lines = wrap(s, 6)
+    assert strip_ansi("".join(lines)) == "あいうえおかきく"
+    assert "".join(lines) == s
+    assert_fits(lines, 6)
+    for line in lines:  # no dangling partial escape
+        assert strip_ansi(line).count("\x1b") == 0
+
+
+def test_ansi_kinsoku():
+    lines = wrap(f"あいう{RED}。{RESET}えお", 6)
+    assert [strip_ansi(l) for l in lines] == ["あい", "う。え", "お"]
+
+
+def test_ansi_truncate_resets():
+    t = truncate(f"{RED}あいうえお{RESET}", 6)
+    assert strip_ansi(t) == "あい…"
+    assert t.endswith(RESET + "…")
+
+
+# --- v0.2: indent / max_lines / keep_all -----------------------------------
+
+def test_initial_indent_per_paragraph():
+    lines = wrap("あいうえお\nかきく", 6, initial_indent="　")
+    assert lines == ["　あい", "うえお", "　かき", "く"]
+    assert_fits(lines, 6)
+
+
+def test_subsequent_indent():
+    lines = wrap("aaa bbb ccc ddd", 9, initial_indent="- ", subsequent_indent="  ")
+    assert lines == ["- aaa bbb", "  ccc ddd"]
+
+
+def test_indent_too_wide():
+    with pytest.raises(ValueError):
+        wrap("abc", 2, initial_indent="ああ")
+
+
+def test_max_lines():
+    lines = wrap("あいうえおかきくけこ", 6, max_lines=2)
+    assert lines == ["あいう", "えお…"]
+    assert_fits(lines, 6)
+
+
+def test_max_lines_not_needed():
+    assert wrap("あい", 6, max_lines=2) == ["あい"]
+
+
+def test_shorten():
+    assert shorten("吾輩は猫である。名前はまだ無い。", 10) == "吾輩は猫…"
+    assert shorten("hello world foo", 12) == "hello world…"
+
+
+def test_keep_all_korean():
+    text = "대한민국의 수도는 서울입니다"
+    lines = wrap(text, 12, keep_all=True)
+    assert lines == ["대한민국의", "수도는", "서울입니다"]
+    default = wrap(text, 12)
+    assert any(w not in text.split() for w in default)  # breaks mid-word
+
+
+def test_long_word_with_indent():
+    lines = wrap("a" * 20, 8, subsequent_indent="  ")
+    assert lines == ["a" * 8, "  " + "a" * 6, "  " + "a" * 6]

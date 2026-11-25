@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Iterator, List
+from typing import Iterator, List, Optional
 
 # 行頭禁則: characters that must not start a line.
 NO_START = frozenset(
@@ -21,6 +22,18 @@ NO_END = frozenset("(（[［{｛〔〈《「『【〘〖〝‘“｟«")
 HANGABLE = frozenset("、。，．,.")
 
 _SPACES = frozenset(" \t　")
+
+# ANSI escape sequences: CSI (colors, cursor), OSC (hyperlinks, titles), 2-byte ESC.
+_ANSI_RE = re.compile(
+    r"\x1b\[[0-?]*[ -/]*[@-~]"
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"
+    r"|\x1b[@-Z\\-_]"
+)
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences (colors, hyperlinks, ...) from ``text``."""
+    return _ANSI_RE.sub("", text)
 
 
 def char_width(ch: str, ambiguous_width: int = 1) -> int:
@@ -47,29 +60,71 @@ def char_width(ch: str, ambiguous_width: int = 1) -> int:
 
 
 def width(text: str, ambiguous_width: int = 1) -> int:
-    """Return the display width of ``text`` in terminal columns."""
+    """Return the display width of ``text`` in terminal columns.
+
+    ANSI escape sequences are ignored.
+    """
+    if "\x1b" in text:
+        text = strip_ansi(text)
     return sum(char_width(c, ambiguous_width) for c in text)
 
 
 def _clusters(text: str) -> Iterator[str]:
-    """Yield rough grapheme clusters: a base char plus trailing zero-width chars."""
+    """Yield rough grapheme clusters: a base char plus trailing zero-width chars.
+
+    ANSI escape sequences are kept intact and attached to a neighbouring
+    cluster, so they are never split and never counted.
+    """
     buf = ""
+    prefix = ""  # escapes seen before any base char of the next cluster
     joiner = False
-    for ch in text:
-        zero = char_width(ch) == 0 and ch not in "\t"
+    pos = 0
+    n = len(text)
+    while pos < n:
+        ch = text[pos]
+        if ch == "\x1b":
+            m = _ANSI_RE.match(text, pos)
+            if m:
+                if buf:
+                    buf += m.group()
+                else:
+                    prefix += m.group()
+                pos = m.end()
+                continue
+        pos += 1
+        zero = char_width(ch) == 0 and ch != "\t"
         if buf and (zero or joiner):
             buf += ch
         else:
             if buf:
                 yield buf
-            buf = ch
-        joiner = ch == "‍"
-    if buf:
-        yield buf
+            buf = prefix + ch
+            prefix = ""
+        joiner = ch == "\u200d"
+    if buf or prefix:
+        yield buf + prefix
+
+
+def _base(cl: str) -> str:
+    """First visible character of a cluster ("" for a pure escape cluster)."""
+    if cl[:1] == "\x1b":
+        cl = strip_ansi(cl)
+    return cl[:1]
 
 
 def _is_wide_cluster(cl: str, ambiguous_width: int) -> bool:
-    return char_width(cl[0], ambiguous_width) >= 2
+    b = _base(cl)
+    return bool(b) and char_width(b, ambiguous_width) >= 2
+
+
+def _first(text: str) -> str:
+    return _base(text)
+
+
+def _last(text: str) -> str:
+    if "\x1b" in text:
+        text = strip_ansi(text)
+    return text[-1:]
 
 
 @dataclass
@@ -80,25 +135,30 @@ class _Unit:
     hang: int = 0  # width of trailing hangable punctuation
 
 
-def _atoms(text: str, ambiguous_width: int) -> List[_Unit]:
-    """Split text into atoms: spaces, latin word runs, single wide clusters."""
+def _atoms(text: str, ambiguous_width: int, keep_all: bool = False) -> List[_Unit]:
+    """Split text into atoms: spaces, word runs, single wide clusters."""
     atoms: List[_Unit] = []
     word = ""
+
+    def push_word() -> None:
+        nonlocal word
+        if word:
+            atoms.append(_Unit(word, width(word, ambiguous_width)))
+            word = ""
+
     for cl in _clusters(text):
-        if cl[0] in _SPACES:
-            if word:
-                atoms.append(_Unit(word, width(word, ambiguous_width)))
-                word = ""
+        b = _base(cl)
+        if b and b in _SPACES:
+            push_word()
             atoms.append(_Unit(cl, width(cl, ambiguous_width) or 1, space=True))
-        elif _is_wide_cluster(cl, ambiguous_width) or cl[0] in NO_START or cl[0] in NO_END:
-            if word:
-                atoms.append(_Unit(word, width(word, ambiguous_width)))
-                word = ""
+        elif b and not keep_all and (
+            _is_wide_cluster(cl, ambiguous_width) or b in NO_START or b in NO_END
+        ):
+            push_word()
             atoms.append(_Unit(cl, width(cl, ambiguous_width)))
         else:
             word += cl
-    if word:
-        atoms.append(_Unit(word, width(word, ambiguous_width)))
+    push_word()
     return atoms
 
 
@@ -108,7 +168,7 @@ def _glue(atoms: List[_Unit], hanging: bool, ambiguous_width: int) -> List[_Unit
     for a in atoms:
         if units and not a.space and not units[-1].space:
             prev = units[-1]
-            if a.text[0] in NO_START or prev.text[-1] in NO_END:
+            if _first(a.text) in NO_START or _last(prev.text) in NO_END:
                 prev.text += a.text
                 prev.width += a.width
                 continue
@@ -118,7 +178,7 @@ def _glue(atoms: List[_Unit], hanging: bool, ambiguous_width: int) -> List[_Unit
             if u.space:
                 continue
             h = 0
-            for ch in reversed(u.text):
+            for ch in reversed(strip_ansi(u.text)):
                 if ch in HANGABLE:
                     h += char_width(ch, ambiguous_width)
                 else:
@@ -135,7 +195,7 @@ def _split_long(u: _Unit, limit: int, ambiguous_width: int) -> List[_Unit]:
 
     def good_break(i: int) -> bool:
         # breaking before cls[i] respects kinsoku
-        return cls[i][0] not in NO_START and cls[i - 1][-1] not in NO_END
+        return _first(cls[i]) not in NO_START and _last(cls[i - 1]) not in NO_END
 
     chunks: List[_Unit] = []
     start = 0
@@ -158,15 +218,20 @@ def _split_long(u: _Unit, limit: int, ambiguous_width: int) -> List[_Unit]:
 
 def _wrap_line(
     line: str,
-    width_: int,
+    first_width: int,
+    rest_width: int,
     hanging: bool,
     break_long_words: bool,
+    keep_all: bool,
     ambiguous_width: int,
 ) -> List[str]:
-    units = _glue(_atoms(line, ambiguous_width), hanging, ambiguous_width)
+    units = _glue(_atoms(line, ambiguous_width, keep_all), hanging, ambiguous_width)
     lines: List[str] = []
     cur: List[_Unit] = []
     cur_w = 0
+
+    def limit() -> int:
+        return rest_width if lines else first_width
 
     def flush() -> None:
         nonlocal cur, cur_w
@@ -181,17 +246,23 @@ def _wrap_line(
                 cur.append(u)
                 cur_w += u.width
             continue
-        if cur_w + u.width - u.hang <= width_:
+        if cur_w + u.width - u.hang <= limit():
             cur.append(u)
             cur_w += u.width
             continue
         if cur:
             flush()
-        if u.width - u.hang > width_ and break_long_words:
-            pieces = _split_long(u, width_, ambiguous_width)
-            for p in pieces[:-1]:
-                lines.append(p.text)
-            u = pieces[-1]
+        if break_long_words:
+            while u.width - u.hang > limit():
+                pieces = _split_long(u, limit(), ambiguous_width)
+                if len(pieces) < 2:
+                    break
+                lines.append(pieces[0].text)
+                u = _Unit(
+                    "".join(x.text for x in pieces[1:]),
+                    sum(x.width for x in pieces[1:]),
+                    hang=u.hang,
+                )
         cur = [u]
         cur_w = u.width
     if cur or not lines:
@@ -203,33 +274,86 @@ def wrap(
     text: str,
     width: int = 70,
     *,
+    initial_indent: str = "",
+    subsequent_indent: str = "",
     hanging: bool = False,
     break_long_words: bool = True,
+    keep_all: bool = False,
+    max_lines: Optional[int] = None,
+    placeholder: str = "…",
     ambiguous_width: int = 1,
 ) -> List[str]:
     """Wrap ``text`` so every line fits in ``width`` terminal columns.
 
-    Existing newlines are kept as hard line breaks. Kinsoku shori (Japanese
-    line-breaking rules) is applied: closing brackets and punctuation never
-    start a line, and opening brackets never end one.
+    Existing newlines are kept as hard line breaks (each input line is a
+    paragraph). Kinsoku shori (Japanese line-breaking rules) is applied:
+    closing brackets and punctuation never start a line, and opening
+    brackets never end one. ANSI escape sequences are preserved and take no
+    width.
 
+    :param initial_indent: prepended to the first line of every paragraph
+        (e.g. ``"\u3000"`` for Japanese paragraph indentation).
+    :param subsequent_indent: prepended to the other lines.
     :param hanging: allow ``、。,.`` to hang past the margin (ぶら下げ).
     :param break_long_words: hard-split units wider than ``width``.
+    :param keep_all: only break at spaces, like CSS ``word-break: keep-all``
+        (natural for Korean).
+    :param max_lines: keep at most this many lines; if text is cut, the last
+        line ends with ``placeholder``.
     :param ambiguous_width: width of East Asian Ambiguous characters (1 or 2).
     """
     if width < 1:
         raise ValueError(f"invalid width {width!r} (must be > 0)")
     if ambiguous_width not in (1, 2):
         raise ValueError("ambiguous_width must be 1 or 2")
+    iw = _w(initial_indent, ambiguous_width)
+    sw = _w(subsequent_indent, ambiguous_width)
+    if width - iw < 1 or width - sw < 1:
+        raise ValueError("indent is as wide as or wider than width")
+    if max_lines is not None and max_lines < 1:
+        raise ValueError("max_lines must be >= 1")
+
     out: List[str] = []
     for line in text.splitlines() or [""]:
-        out.extend(_wrap_line(line, width, hanging, break_long_words, ambiguous_width))
+        wrapped = _wrap_line(
+            line, width - iw, width - sw, hanging, break_long_words, keep_all,
+            ambiguous_width,
+        )
+        out.append(initial_indent + wrapped[0] if wrapped[0] else wrapped[0])
+        out.extend(subsequent_indent + l for l in wrapped[1:])
+
+    if max_lines is not None and len(out) > max_lines:
+        out = out[:max_lines]
+        out[-1] = _with_placeholder(out[-1], width, placeholder, ambiguous_width)
     return out
+
+
+def _with_placeholder(line: str, width_: int, placeholder: str, aw: int) -> str:
+    pw = _w(placeholder, aw)
+    if pw > width_:
+        raise ValueError("placeholder is wider than width")
+    cls = list(_clusters(line))
+    while cls and (
+        _w("".join(cls), aw) + pw > width_
+        or _first(cls[-1]) in _SPACES
+        or _first(placeholder) in NO_START and _first(cls[-1]) in NO_END
+    ):
+        cls.pop()
+    body = "".join(cls)
+    if "\x1b" in line:
+        body += "\x1b[0m"
+    return body + placeholder
 
 
 def fill(text: str, width: int = 70, **kwargs) -> str:
     """Like :func:`wrap` but return a single string joined by newlines."""
     return "\n".join(wrap(text, width, **kwargs))
+
+
+def shorten(text: str, width: int, placeholder: str = "…", **kwargs) -> str:
+    """Wrap ``text`` and keep only what fits on one line (like textwrap.shorten,
+    but whitespace is not collapsed and kinsoku is respected)."""
+    return wrap(text, width, max_lines=1, placeholder=placeholder, **kwargs)[0]
 
 
 def truncate(
@@ -239,7 +363,11 @@ def truncate(
     *,
     ambiguous_width: int = 1,
 ) -> str:
-    """Cut ``text`` to fit in ``width`` columns, appending ``placeholder``."""
+    """Cut ``text`` to fit in ``width`` columns, appending ``placeholder``.
+
+    ANSI escape sequences are kept intact; if any are present and the text is
+    cut, a reset sequence is inserted before the placeholder.
+    """
     if _w(text, ambiguous_width) <= width:
         return text
     pw = _w(placeholder, ambiguous_width)
@@ -252,6 +380,8 @@ def truncate(
             break
         buf += cl
         bw += cw
+    if "\x1b" in text:
+        buf += "\x1b[0m"
     return buf + placeholder
 
 

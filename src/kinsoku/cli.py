@@ -30,6 +30,14 @@ def main(argv: Optional[List[str]] = None) -> int:
                    help="let 、。,. hang past the margin (ぶら下げ)")
     p.add_argument("--no-break-long-words", action="store_true",
                    help="never split words wider than the line")
+    p.add_argument("--keep-all", action="store_true",
+                   help="break only at spaces (word-break: keep-all, for Korean)")
+    p.add_argument("-i", "--indent", default="",
+                   help="indent for the first line of each paragraph (e.g. '　')")
+    p.add_argument("-s", "--subsequent-indent", default="",
+                   help="indent for the other lines")
+    p.add_argument("-n", "--max-lines", type=int, default=None,
+                   help="keep at most N lines, ending with …")
     p.add_argument("--ambiguous-width", type=int, choices=(1, 2), default=1,
                    help="width of East Asian Ambiguous chars (default: 1)")
     p.add_argument("--truncate", action="store_true",
@@ -42,6 +50,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     w = args.width or _default_width()
     if w < 1:
         p.error("width must be > 0")
+    if args.max_lines is not None and args.max_lines < 1:
+        p.error("--max-lines must be >= 1")
 
     chunks = []
     if args.files:
@@ -60,11 +70,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         for line in text.splitlines():
             print(truncate(line, w, ambiguous_width=args.ambiguous_width))
         return 0
-    print(fill(
+    try:
+        out = fill(
         text.rstrip("\n"),
         w,
         hanging=args.hanging,
         break_long_words=not args.no_break_long_words,
+        keep_all=args.keep_all,
+        initial_indent=args.indent,
+        subsequent_indent=args.subsequent_indent,
+        max_lines=args.max_lines,
         ambiguous_width=args.ambiguous_width,
-    ))
+        )
+    except ValueError as e:
+        p.error(str(e))
+    print(out)
     return 0

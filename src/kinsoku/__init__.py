@@ -7,6 +7,8 @@ from ._core import (
     char_width,
     fill,
     pad,
+    shorten,
+    strip_ansi,
     truncate,
     width,
     wrap,
@@ -19,8 +21,10 @@ __all__ = [
     "char_width",
     "fill",
     "pad",
+    "shorten",
+    "strip_ansi",
     "truncate",
     "width",
     "wrap",
 ]
-__version__ = "0.1.0"
+__version__ = "0.2.0"
