@@ -79,7 +79,13 @@ kinsoku --width-of file.txt          # 各行の表示幅を出力
 kinsoku -w 40 -i "　" novel.txt      # 段落頭を全角スペースで字下げ
 kinsoku -w 40 -n 3 summary.txt       # 3行まで
 kinsoku -w 40 --rules zh-hans cn.txt # 中国語（簡体字）の禁則で折り返す
+kinsoku --truncate -w 20 --placeholder ... list.txt  # 省略記号を変更
+kinsoku -w 40 --encoding cp932 aozora.txt  # Shift_JIS（青空文庫など）を読む
+kinsoku a.txt - b.txt                # - は標準入力。ファイルごとに独立して処理
 ```
+
+`-w` を省略すると環境変数 `COLUMNS` → 端末幅 → 80 の順で幅を決めます。
+`--truncate` と `--width-of` は同時に指定できず、折り返し専用のオプション（`-n` `--hanging` など）と組み合わせるとエラーになります。
 
 ## textwrap からの移行
 
@@ -339,6 +345,7 @@ applies Japanese line-breaking rules:
 API: `width`, `char_width`, `strip_ansi`, `wrap`, `fill`, `shorten`, `truncate`, `pad`,
 `KinsokuWrapper`, `dedent`, `indent`, `tategaki`, `KinsokuRules`, `PRESETS`, `ansi_reflow`, `unwrap`, `rewrap`, `table`,
 `strip_ruby`, `ruby_to_html`.
-CLI: `kinsoku -w N [FILE...]`.
+CLI: `kinsoku -w N [FILE...]` (`-` = stdin; width defaults to `$COLUMNS`/terminal/80;
+`--encoding cp932` for Shift_JIS input; `--placeholder` for `--truncate` / `-n`).
 
 License: MIT
