@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import os
 import sys
 from typing import List, Optional
@@ -11,6 +13,7 @@ from . import __version__
 from ._core import PRESETS, fill, truncate, width
 from .tategaki import tategaki
 from .unwrap import rewrap, unwrap
+from .table import STYLES, table
 
 
 def _default_width() -> int:
@@ -60,6 +63,15 @@ def main(argv: Optional[List[str]] = None) -> int:
                    help="unwrap, then wrap again to -w columns")
     p.add_argument("--indent-marks-paragraph", action="store_true",
                    help="with --unwrap/--rewrap: an indented line starts a new paragraph")
+    p.add_argument("--table", action="store_true",
+                   help="format CSV/TSV input as a table (-w is the total width budget)")
+    p.add_argument("--delimiter", default=None,
+                   help="CSV delimiter for --table (default: tab if the first line "
+                        "has one, else comma; '\\t' means tab)")
+    p.add_argument("--no-header", action="store_true",
+                   help="with --table: the first row is data, not a header")
+    p.add_argument("--style", choices=STYLES, default="simple",
+                   help="table style for --table (default: simple)")
     p.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
     args = p.parse_args(argv)
 
@@ -87,6 +99,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             p.error("--gap must be >= 0")
         print(tategaki(text.rstrip("\n"), args.tategaki, gap=args.gap))
         return 0
+    if args.table:
+        return _table(p, args, text)
     if args.width_of:
         for line in text.splitlines():
             print(width(line, args.ambiguous_width))
@@ -135,4 +149,36 @@ def main(argv: Optional[List[str]] = None) -> int:
     except ValueError as e:
         p.error(str(e))
     print(out)
+    return 0
+
+
+def _table(p: argparse.ArgumentParser, args: argparse.Namespace, text: str) -> int:
+    delim = args.delimiter
+    if delim in ("\\t", "tab"):
+        delim = "\t"
+    if delim is None:
+        first = text.split("\n", 1)[0]
+        delim = "\t" if "\t" in first else ","
+    if len(delim) != 1:
+        p.error("--delimiter must be a single character")
+    rows = [r for r in csv.reader(io.StringIO(text), delimiter=delim) if r]
+    headers = None
+    if rows and not args.no_header:
+        headers, rows = rows[0], rows[1:]
+    try:
+        out = table(
+            rows,
+            headers,
+            width=args.width,
+            style=args.style,
+            ambiguous_width=args.ambiguous_width,
+            hanging=args.hanging,
+            break_long_words=not args.no_break_long_words,
+            keep_all=args.keep_all,
+            rules=args.rules,
+        )
+    except ValueError as e:
+        p.error(str(e))
+    if out:
+        print(out)
     return 0

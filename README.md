@@ -215,6 +215,59 @@ kinsoku --rewrap -w 40 mail.txt
 kinsoku --rewrap -w 40 --indent-marks-paragraph novel.txt
 ```
 
+### 表を整形する（table）
+
+CJK が混ざった表を表示幅で揃えます。`max_col_width` や `width`（表全体の幅）を超えるセルは、禁則つきで折り返します。
+
+```python
+rows = [
+    ["東京", "日本の首都。人口は約1400万人で、世界有数の大都市です。", 1400],
+    ["大阪", "「天下の台所」と呼ばれた商業の街。", 275],
+    ["NYC", "New York City", 830],
+]
+print(kinsoku.table(rows, ["都市", "説明", "人口(万)"], width=36,
+                    style="grid", align=["left", "left", "right"]))
+```
+
+```
+┌──────┬────────────────┬──────────┐
+│ 都市 │ 説明           │ 人口(万) │
+├──────┼────────────────┼──────────┤
+│ 東京 │ 日本の首都。人 │     1400 │
+│      │ 口は約1400万人 │          │
+│      │ で、世界有数の │          │
+│      │ 大都市です。   │          │
+├──────┼────────────────┼──────────┤
+│ 大阪 │ 「天下の台所」 │      275 │
+│      │ と呼ばれた商業 │          │
+│      │ の街。         │          │
+├──────┼────────────────┼──────────┤
+│ NYC  │ New York City  │      830 │
+└──────┴────────────────┴──────────┘
+```
+
+| 引数 | 説明 |
+| --- | --- |
+| `headers` | 見出し行（省略可） |
+| `align` | `"left"`（既定）/ `"right"` / `"center"`、または列ごとのリスト |
+| `max_col_width` | 列の最大幅（整数、または列ごとのリスト）。超えるセルは `kinsoku.wrap` で折り返す |
+| `width` | 表全体の幅の上限。超える場合は一番広い列から順に（最小4まで）縮めて折り返す |
+| `style` | `"simple"`（既定。見出し＋`-` の下線、列間は空白2つ）/ `"grid"`（罫線）/ `"markdown"` / `"plain"` |
+| `ambiguous_width` | `2` のとき、罫線文字（`┌─│` は East Asian Ambiguous）を使うとずれるため、`grid` は ASCII の `+-\|` で描く |
+
+- セルは `str()` で文字列にし、`None` は空欄になります。セル内の改行はそのまま複数行になります
+- 行ごとに列数が違う場合は、足りないセルを空欄で補います
+- ANSI の色付きセルも幅0として揃えます。折り返したセルは行ごとに色をリセットし、罫線に色がにじみません
+- `markdown` では `|` をエスケープし、複数行のセルを `<br>` でつなぎます（`width` を指定しても各行の幅は揃いません）
+- その他のキーワード引数（`hanging`、`keep_all` など）は `kinsoku.wrap` に渡されます
+
+CLI では `--table` で CSV / TSV を表にします。区切り文字は1行目にタブがあればタブ、なければカンマ（`--delimiter` で指定可）。1行目は見出しとして扱います（`--no-header` で無効）。`-w` を指定すると表全体の幅の上限になります。
+
+```bash
+kinsoku --table --style grid -w 60 data.csv
+cat data.tsv | kinsoku --table --style markdown
+```
+
 ## 仕様
 
 - **行頭禁則**: `、。，．）」』】ー` 小書きの仮名 `ぁぃぅっゃ` `ァィゥッャ` `…・：；々` など
@@ -262,9 +315,10 @@ applies Japanese line-breaking rules:
 - `unwrap()` joins hard-wrapped lines back into paragraphs (no space between CJK
   characters, one space for latin text, blank lines kept); `rewrap(text, width)`
   unwraps and wraps again. CLI: `--unwrap`, `--rewrap`
+- `table(rows, headers)` renders aligned tables (styles `simple`, `grid`, `markdown`, `plain`) with kinsoku wrapping inside cells, a `width` budget, per-column `align` and ANSI-safe cells; `kinsoku --table` formats CSV/TSV input
 
 API: `width`, `char_width`, `strip_ansi`, `wrap`, `fill`, `shorten`, `truncate`, `pad`,
-`KinsokuWrapper`, `dedent`, `indent`, `tategaki`, `KinsokuRules`, `PRESETS`, `ansi_reflow`, `unwrap`, `rewrap`.
+`KinsokuWrapper`, `dedent`, `indent`, `tategaki`, `KinsokuRules`, `PRESETS`, `ansi_reflow`, `unwrap`, `rewrap`, `table`.
 CLI: `kinsoku -w N [FILE...]`.
 
 License: MIT
