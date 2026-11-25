@@ -186,6 +186,35 @@ kinsoku.wrap("あいーう", 4, rules=rules)       # => ['あい', 'ーう']
 
 CLI では `--ansi-reflow`。
 
+### 折り返しを戻す（unwrap / rewrap）
+
+メールやターミナルからコピーした「すでに折り返されている文章」を段落に戻したり、別の幅で折り返し直したりできます。
+
+```python
+kinsoku.unwrap("吾輩は猫で\nある。名前\nはまだ無い。")
+# => '吾輩は猫である。名前はまだ無い。'
+kinsoku.unwrap("The quick\nbrown fox\n\nwell-\nknown")
+# => 'The quick brown fox\n\nwell-known'
+kinsoku.unwrap("\u3000一段落目の\n文です。\n\u3000二段落目\nです。", indent_marks_paragraph=True)
+# => '\u3000一段落目の文です。\n\u3000二段落目です。'
+kinsoku.rewrap("吾輩は猫で\nある。名前\nはまだ無い。", 8)
+# => '吾輩は猫\nである。\n名前はま\nだ無い。'
+```
+
+- 空行（空白だけの行を含む）は段落の区切りとしてそのまま残します
+- 改行の前後がどちらも全角（CJK）か、どちらかが `。」（` などの全角約物ならスペースなしで、それ以外はスペース1つで連結します
+- 行末が「英字＋`-`」のときはハイフンを残したままスペースなしで連結します（`well-\nknown` → `well-known`）。本物のハイフンと区別できないため、ハイフンを削除することはしません
+- `- ` `* ` `・` `1. ` などで始まる箇条書きらしい行は、常に新しい段落とみなします
+- `indent_marks_paragraph=True` で、全角スペースや半角スペースで字下げされた行を段落の始まりとみなします（字下げは保持）
+- ANSI エスケープは判定では無視し、出力にはそのまま残します。`\r\n` にも対応
+- `rewrap(text, width, **kwargs)` は `unwrap` してから段落ごとに折り返します。`hanging` などの `wrap` の引数をそのまま渡せます
+
+```bash
+pbpaste | kinsoku --unwrap
+kinsoku --rewrap -w 40 mail.txt
+kinsoku --rewrap -w 40 --indent-marks-paragraph novel.txt
+```
+
 ## 仕様
 
 - **行頭禁則**: `、。，．）」』】ー` 小書きの仮名 `ぁぃぅっゃ` `ァィゥッャ` `…・：；々` など
@@ -230,9 +259,12 @@ applies Japanese line-breaking rules:
   `KinsokuRules.preset("ja").replace(...)`
 - `ansi_reflow=True` closes active colors / OSC 8 links at each line end and
   reopens them on the next line (also `ansi_reflow(lines)`, CLI `--ansi-reflow`)
+- `unwrap()` joins hard-wrapped lines back into paragraphs (no space between CJK
+  characters, one space for latin text, blank lines kept); `rewrap(text, width)`
+  unwraps and wraps again. CLI: `--unwrap`, `--rewrap`
 
 API: `width`, `char_width`, `strip_ansi`, `wrap`, `fill`, `shorten`, `truncate`, `pad`,
-`KinsokuWrapper`, `dedent`, `indent`, `tategaki`, `KinsokuRules`, `PRESETS`, `ansi_reflow`.
+`KinsokuWrapper`, `dedent`, `indent`, `tategaki`, `KinsokuRules`, `PRESETS`, `ansi_reflow`, `unwrap`, `rewrap`.
 CLI: `kinsoku -w N [FILE...]`.
 
 License: MIT

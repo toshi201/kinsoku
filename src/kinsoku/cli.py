@@ -10,6 +10,7 @@ from typing import List, Optional
 from . import __version__
 from ._core import PRESETS, fill, truncate, width
 from .tategaki import tategaki
+from .unwrap import rewrap, unwrap
 
 
 def _default_width() -> int:
@@ -53,12 +54,20 @@ def main(argv: Optional[List[str]] = None) -> int:
                    help="vertical layout (縦書き), HEIGHT chars per column")
     p.add_argument("--gap", type=int, default=1,
                    help="spaces between tategaki columns (default: 1)")
+    p.add_argument("--unwrap", action="store_true",
+                   help="join hard-wrapped lines back into paragraphs")
+    p.add_argument("--rewrap", action="store_true",
+                   help="unwrap, then wrap again to -w columns")
+    p.add_argument("--indent-marks-paragraph", action="store_true",
+                   help="with --unwrap/--rewrap: an indented line starts a new paragraph")
     p.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
     args = p.parse_args(argv)
 
     w = args.width or _default_width()
     if w < 1:
         p.error("width must be > 0")
+    if args.unwrap and args.rewrap:
+        p.error("--unwrap and --rewrap cannot be combined")
     if args.max_lines is not None and args.max_lines < 1:
         p.error("--max-lines must be >= 1")
 
@@ -85,6 +94,29 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.truncate:
         for line in text.splitlines():
             print(truncate(line, w, ambiguous_width=args.ambiguous_width))
+        return 0
+    if args.unwrap:
+        out = unwrap(text, indent_marks_paragraph=args.indent_marks_paragraph)
+    elif args.rewrap:
+        try:
+            out = rewrap(
+                text,
+                w,
+                indent_marks_paragraph=args.indent_marks_paragraph,
+                hanging=args.hanging,
+                break_long_words=not args.no_break_long_words,
+                keep_all=args.keep_all,
+                initial_indent=args.indent,
+                subsequent_indent=args.subsequent_indent,
+                max_lines=args.max_lines,
+                ambiguous_width=args.ambiguous_width,
+                rules=args.rules,
+                ansi_reflow=args.ansi_reflow,
+            )
+        except ValueError as e:
+            p.error(str(e))
+    if args.unwrap or args.rewrap:
+        sys.stdout.write(out if out.endswith("\n") or not out else out + "\n")
         return 0
     try:
         out = fill(
