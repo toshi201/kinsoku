@@ -7,7 +7,7 @@ name = "kinsoku"
 version = "0.2.0"
 description = "Japanese/CJK-aware text wrapping with kinsoku shori (禁則処理) and display-width support"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "MIT"
 keywords = ["japanese", "cjk", "textwrap", "kinsoku", "east-asian-width", "terminal"]
 classifiers = [
