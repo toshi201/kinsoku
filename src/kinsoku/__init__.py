@@ -13,6 +13,7 @@ from ._core import (
     width,
     wrap,
 )
+from .tategaki import tategaki
 from .wrapper import KinsokuWrapper, dedent, indent
 
 __all__ = [
@@ -30,5 +31,6 @@ __all__ = [
     "KinsokuWrapper",
     "dedent",
     "indent",
+    "tategaki",
 ]
 __version__ = "0.2.0"

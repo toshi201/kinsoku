@@ -106,6 +106,42 @@ print(kinsoku.indent(kinsoku.dedent(doc), "> "))
 - 区切り位置の空白は常に削除されます（`drop_whitespace=False` は無効）。`fix_sentence_endings` / `break_on_hyphens` は受け付けますが無視します
 - `hanging` / `keep_all` / `ambiguous_width` などの kinsoku 独自オプションはキーワード引数で指定できます
 
+### 縦書き（tategaki）
+
+`kinsoku.tategaki(text, height)` はテキストをターミナル用の縦書きに組みます。1列 `height` マス（1マス = 全角1文字 = 2桁）、列は右から左へ、改行ごとに新しい列になります。
+
+```python
+print(kinsoku.tategaki("吾輩は猫である。名前はまだ無い。\n「ニャーニャー」と泣いていた。", 6))
+```
+
+```text
+い ニ ﹁ だ る 吾
+て ャ ニ 無 ︒ 輩
+い ｜ ャ い 名 は
+た ﹂ ｜ ︒ 前 猫
+︒ と 　 　 は で
+　 泣 　 　 ま あ
+```
+
+```python
+print(kinsoku.tategaki("令和8年12月25日", 5, halfwidth="pair"))   # 縦中横
+```
+
+```text
+月 令
+25 和
+日 8 
+　 年
+　 12
+```
+
+- 括弧・句読点・長音などは縦書き用の字形に置き換えます（`「」`→`﹁﹂`、`（）`→`︵︶`、`、。`→`︑︒`、`…`→`︙`、`—`→`︱` など）。`ー` は `｜`（U+FF5C）、縦書き形のない `～` `〜` は `≀`（U+2240）で代用します
+- 空きマスは全角スペース（U+3000）で埋めるので、どの行も同じ表示幅になります。列間は `gap`（既定 1）個の半角スペース
+- 半角英数字は `halfwidth="fullwidth"`（既定）で全角に変換して1マスに1文字、`halfwidth="pair"` で2文字ずつ1マスに入れます（縦中横）
+- 禁則：`。」ャ` などは列頭に、`「（` などは列末に来ないよう前後の文字を次の列へ追い出します。`hanging=True`（既定）では `、。，．` を列の下に1マスぶら下げ、そのときは全列が `height + 1` 行になります
+- 結合文字・ゼロ幅文字は直前のマスに付け、ANSI エスケープ（色）は取り除きます
+- CLI: `kinsoku --tategaki 10 [--gap 2] novel.txt`
+
 ## 仕様
 
 - **行頭禁則**: `、。，．）」』】ー` 小書きの仮名 `ぁぃぅっゃ` `ァィゥッャ` `…・：；々` など
@@ -141,6 +177,9 @@ applies Japanese line-breaking rules:
 - `KinsokuWrapper`: a drop-in replacement for `textwrap.TextWrapper` (same
   constructor arguments, mutable attributes, `.wrap()` / `.fill()`); `dedent`
   and `indent` are re-exported from `textwrap`
+- `tategaki(text, height)`: vertical (top-to-bottom, right-to-left) layout for
+  terminals with vertical presentation forms, kinsoku and hanging punctuation
+  (CLI: `--tategaki HEIGHT`)
 
 API: `width`, `char_width`, `strip_ansi`, `wrap`, `fill`, `shorten`, `truncate`, `pad`,
 `KinsokuWrapper`, `dedent`, `indent`.

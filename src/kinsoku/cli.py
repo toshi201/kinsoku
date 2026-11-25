@@ -9,6 +9,7 @@ from typing import List, Optional
 
 from . import __version__
 from ._core import fill, truncate, width
+from .tategaki import tategaki
 
 
 def _default_width() -> int:
@@ -44,6 +45,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                    help="truncate each line with … instead of wrapping")
     p.add_argument("--width-of", action="store_true",
                    help="print the display width of each input line")
+    p.add_argument("--tategaki", type=int, default=None, metavar="HEIGHT",
+                   help="vertical layout (縦書き), HEIGHT chars per column")
+    p.add_argument("--gap", type=int, default=1,
+                   help="spaces between tategaki columns (default: 1)")
     p.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
     args = p.parse_args(argv)
 
@@ -62,6 +67,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         chunks.append(sys.stdin.read())
     text = "".join(chunks)
 
+    if args.tategaki is not None:
+        if args.tategaki < 1:
+            p.error("--tategaki HEIGHT must be >= 1")
+        if args.gap < 0:
+            p.error("--gap must be >= 0")
+        print(tategaki(text.rstrip("\n"), args.tategaki, gap=args.gap))
+        return 0
     if args.width_of:
         for line in text.splitlines():
             print(width(line, args.ambiguous_width))
