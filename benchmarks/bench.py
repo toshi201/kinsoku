@@ -29,6 +29,7 @@ SMALL = "ゃゅょっャュョッー"
 WORDS = ["Python", "terminal", "UTF-8", "kinsoku", "API", "example.com", "v1.2.3"]
 COLORS = ["\x1b[31m", "\x1b[32m", "\x1b[1;34m", "\x1b[38;5;208m"]
 RESET = "\x1b[0m"
+LONG_WORD_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 
 def _phrase(rng: random.Random) -> str:
@@ -84,6 +85,10 @@ def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description="kinsoku benchmark")
     ap.add_argument("--size", type=int, default=1_000_000, help="text size in bytes")
     ap.add_argument("--repeat", type=int, default=3, help="runs per case (best is shown)")
+    ap.add_argument(
+        "--long-word", type=int, default=200_000,
+        help="length of the long-word case (chars)",
+    )
     args = ap.parse_args(argv)
 
     text = generate(args.size)
@@ -98,19 +103,27 @@ def main(argv=None) -> None:
     def tw(w):
         return lambda: [textwrap.wrap(l, w) for l in lines]
 
+    # one long word without spaces (base64, hashes, minified JS), #43
+    rng = random.Random(43)
+    long_word = "".join(rng.choices(LONG_WORD_CHARS, k=args.long_word))
+
     cases = [
         ("kinsoku.wrap(width=40)", lambda: kinsoku.wrap(text, 40)),
         ("kinsoku.wrap(width=80)", lambda: kinsoku.wrap(text, 80)),
         ("kinsoku.width", lambda: kinsoku.width(text)),
         ("textwrap.wrap(width=40) [ref]", tw(40)),
         ("textwrap.wrap(width=80) [ref]", tw(80)),
+        (f"kinsoku.wrap(long word {len(long_word) // 1000}k, 76)",
+         lambda: kinsoku.wrap(long_word, 76)),
+        ("textwrap.wrap(long word, 76) [ref]", lambda: textwrap.wrap(long_word, 76)),
     ]
-    print(f"{'case':<32} {'seconds':>9} {'MB/s':>8}")
-    print("-" * 51)
+    print(f"{'case':<36} {'seconds':>9} {'MB/s':>8}")
+    print("-" * 55)
     mb = nbytes / 1e6
     for name, fn in cases:
         t = best(fn, args.repeat)
-        print(f"{name:<32} {t:>9.4f} {mb / t:>8.2f}")
+        size = len(long_word) / 1e6 if "long word" in name else mb
+        print(f"{name:<36} {t:>9.4f} {size / t:>8.2f}")
 
 
 if __name__ == "__main__":

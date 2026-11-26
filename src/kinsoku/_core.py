@@ -12,6 +12,7 @@ from functools import lru_cache
 from itertools import repeat
 from types import MappingProxyType
 from typing import (
+    Dict,
     FrozenSet,
     Iterable,
     Iterator,
@@ -62,6 +63,12 @@ class KinsokuRules:
     :param no_end: characters that must not end a line (行末禁則).
     :param hangable: punctuation allowed to hang past the margin with
         ``hanging=True`` (ぶら下げ).
+    :param quotes: ASCII-style quotes whose opening and closing forms look
+        the same (``"`` ``'``, the default).  Next to CJK text they are
+        told apart by context and kept with the text they quote: an opening
+        quote never ends a line and a closing one never starts a line.
+        Inside latin words and phrases (``"hello world"``, ``don't``)
+        nothing changes.  ``quotes=""`` turns this off.
 
     Any iterable of characters (including a plain ``str``) is accepted and
     converted to a ``frozenset``. To customize a preset, use
@@ -75,9 +82,10 @@ class KinsokuRules:
     no_start: FrozenSet[str] = frozenset()
     no_end: FrozenSet[str] = frozenset()
     hangable: FrozenSet[str] = frozenset()
+    quotes: FrozenSet[str] = frozenset("\"'")
 
     def __post_init__(self) -> None:
-        for name in ("no_start", "no_end", "hangable"):
+        for name in ("no_start", "no_end", "hangable", "quotes"):
             value = getattr(self, name)
             if isinstance(value, str) or not isinstance(value, frozenset):
                 object.__setattr__(self, name, frozenset(value))
@@ -768,6 +776,8 @@ class _Unit:
     width: int
     space: bool = False
     hang: int = 0  # width of trailing hangable punctuation
+    glue_next: bool = False  # an opening quote: keep with the next atom
+    glue_prev: bool = False  # a closing quote: keep with the previous atom
 
 
 def _atoms(
@@ -824,6 +834,14 @@ def _atoms(
         src = _clusters(text)
         rmode = False
 
+    # ASCII quotes next to CJK text (#52): decide open/close up front, since
+    # that needs the next character
+    qs = rules.quotes - no_start - no_end
+    qdec: Optional[Iterator[Optional[bool]]] = None
+    if qs and not keep_all and any(q in text for q in qs):
+        src = list(src)
+        qdec = iter(_quote_kinds(src, rmode, qs, no_start, no_end))
+
     for cl in src:
         # The width of a word run is the sum of its cluster widths, so each
         # cluster is measured exactly once.
@@ -862,6 +880,19 @@ def _atoms(
                     flush()
                 append(_Unit(cl, w))
         else:
+            if qdec is not None and b in qs:
+                kind = next(qdec)
+                if kind is not None:
+                    if kind:  # opening: glued to what follows
+                        if word or pend:
+                            flush()
+                        append(_Unit(cl, w, glue_next=True))
+                        continue
+                    if not word or pend:  # closing: glued to what precedes
+                        if word or pend:
+                            flush()
+                        append(_Unit(cl, w, glue_prev=True))
+                        continue
             if pend:
                 if not b:  # escape-only cluster: decide on the next character
                     pend.append((cl, w))
@@ -878,6 +909,69 @@ def _atoms(
     if word or pend:
         flush()
     return atoms
+
+
+def _quote_kinds(
+    items: List,
+    rmode: bool,
+    qs: FrozenSet[str],
+    no_start: FrozenSet[str],
+    no_end: FrozenSet[str],
+) -> List[Optional[bool]]:
+    """Classify each quote in ``items`` (clusters or ruby items) for :func:`_atoms`.
+
+    ``True`` is an opening quote, ``False`` a closing one and ``None`` a
+    quote left alone (inside a latin word such as ``don't``, or between
+    spaces).  A quote before a space or the end of the line closes, one
+    after a space, the start of the line or an opening bracket opens, one
+    before closing punctuation (``"。``) closes, and one between two other
+    characters (``彼は"テスト"と``) closes only if a quote of the same kind
+    is open.  That last rule needs a non-ASCII character on at least one
+    side; a quote between two ASCII characters (``key:"value"``) is left
+    alone.
+    """
+    bases = []
+    for it in items:
+        if rmode:
+            bases.append(it[2])
+        else:
+            bases.append(it if len(it) == 1 else _base(it))
+    kinds: List[Optional[bool]] = []
+    depth: Dict[str, int] = {}
+    wch = _WORD_CH
+    prev = ""
+    n = len(bases)
+    for i, b in enumerate(bases):
+        if not b:
+            continue
+        if b in qs:
+            j = i + 1
+            while j < n and not bases[j]:
+                j += 1
+            nxt = bases[j] if j < n else ""
+            kind: Optional[bool]
+            if not nxt or nxt in _SPACES:
+                kind = False if prev and prev not in _SPACES else None
+            elif not prev or prev in _SPACES or prev in no_end:
+                kind = True
+            elif nxt in no_start:
+                kind = False
+            elif (prev in wch and nxt in wch) or (
+                prev[0] < "\x80" and nxt[0] < "\x80"
+            ):
+                # Between two ASCII characters (``key:"value"``) the quote
+                # stays part of the latin word, as before; the depth rule is
+                # only for quotes touching non-ASCII text (``彼は"テスト"と``).
+                kind = None
+            else:
+                kind = not depth.get(b)
+            if kind is True:
+                depth[b] = depth.get(b, 0) + 1
+            elif kind is False and depth.get(b):
+                depth[b] -= 1
+            kinds.append(kind)
+        prev = b
+    return kinds
 
 
 def _ruby_items(
@@ -905,11 +999,17 @@ def _glue(
     for a in atoms:
         if units and not a.space and not units[-1].space:
             prev = units[-1]
-            if _first(a.text) in no_start or _last(prev.text) in no_end:
+            if (
+                a.glue_prev
+                or prev.glue_next
+                or _first(a.text) in no_start
+                or _last(prev.text) in no_end
+            ):
                 prev.text += a.text
                 prev.width += a.width
+                prev.glue_next = a.glue_next
                 continue
-        units.append(_Unit(a.text, a.width, a.space))
+        units.append(_Unit(a.text, a.width, a.space, glue_next=a.glue_next))
     if hanging:
         for u in units:
             if u.space:
@@ -925,6 +1025,81 @@ def _glue(
     return units
 
 
+def _split_prep(
+    u: _Unit,
+    ambiguous_width: int,
+    ruby: bool = False,
+    ruby_width: str = "full",
+    rules: KinsokuRules = _JA,
+) -> Tuple[List[str], List[int], FrozenSet[int]]:
+    """Clusters of ``u``, their widths and the indices no break may come
+    before (next to a quote, #52), for :func:`_chunk_end`."""
+    if ruby:
+        pieces = list(_pieces(u.text, ambiguous_width, ruby, ruby_width))
+        cls = [c for c, _ in pieces]
+        ws = [w for _, w in pieces]
+    else:
+        cls = list(_clusters(u.text))
+        ws = [width(c, ambiguous_width) for c in cls]
+    if "ﾞ" in u.text or "ﾟ" in u.text:
+        cls, ws = _join_sound_marks(cls, ws)
+    nobreak: FrozenSet[int] = frozenset()
+    qs = rules.quotes - rules.no_start - rules.no_end
+    if qs and any(q in u.text for q in qs):
+        kinds = iter(_quote_kinds(cls, False, qs, rules.no_start, rules.no_end))
+        nb = set()
+        for i, c in enumerate(cls):
+            b = c if len(c) == 1 else _base(c)
+            if b in qs:
+                kind = next(kinds)
+                if kind is not None:
+                    nb.add(i + 1 if kind else i)
+        nobreak = frozenset(nb)
+    return cls, ws, nobreak
+
+
+def _chunk_end(
+    cls: List[str],
+    ws: List[int],
+    start: int,
+    limit: int,
+    rules: KinsokuRules = _JA,
+    ruby: bool = False,
+    nobreak: FrozenSet[int] = frozenset(),
+) -> int:
+    """End index of the hard-split chunk that starts at ``cls[start]``.
+
+    Takes time proportional to the chunk, not to the rest of the word (#43).
+    """
+    no_start = rules.no_start
+    no_end = rules.no_end
+
+    def good_break(i: int) -> bool:
+        # breaking before cls[i] respects kinsoku
+        return (
+            _first(cls[i]) not in no_start
+            and _last(cls[i - 1]) not in no_end
+            and i not in nobreak
+        )
+
+    n = len(cls)
+    end, bw = start, 0
+    while end < n and (end == start or bw + ws[end] <= limit):
+        bw += ws[end]
+        end += 1
+    if end < n:
+        # back off to the latest kinsoku-safe break inside this chunk
+        for j in range(end, start, -1):
+            if good_break(j):
+                return j
+        if ruby and end == start + 1 and _RUBY_RE.fullmatch(strip_ansi(cls[start])):
+            # a lone, unbreakable ruby unit: let the line overflow
+            # rather than push 。」 etc. to the start of the next line
+            while end < n and not good_break(end):
+                end += 1
+    return end
+
+
 def _split_long(
     u: _Unit,
     limit: int,
@@ -937,43 +1112,12 @@ def _split_long(
 
     Ruby notations (``ruby=True``) are never split.
     """
-    if ruby:
-        pieces = list(_pieces(u.text, ambiguous_width, ruby, ruby_width))
-        cls = [c for c, _ in pieces]
-        ws = [w for _, w in pieces]
-    else:
-        cls = list(_clusters(u.text))
-        ws = [width(c, ambiguous_width) for c in cls]
-    if "ﾞ" in u.text or "ﾟ" in u.text:
-        cls, ws = _join_sound_marks(cls, ws)
-
-    def good_break(i: int) -> bool:
-        # breaking before cls[i] respects kinsoku
-        return (
-            _first(cls[i]) not in rules.no_start
-            and _last(cls[i - 1]) not in rules.no_end
-        )
-
+    cls, ws, nobreak = _split_prep(u, ambiguous_width, ruby, ruby_width, rules)
     chunks: List[_Unit] = []
     start = 0
     n = len(cls)
     while start < n:
-        end, bw = start, 0
-        while end < n and (end == start or bw + ws[end] <= limit):
-            bw += ws[end]
-            end += 1
-        if end < n:
-            # back off to the latest kinsoku-safe break inside this chunk
-            for j in range(end, start, -1):
-                if good_break(j):
-                    end = j
-                    break
-            else:
-                if ruby and end == start + 1 and _RUBY_RE.fullmatch(strip_ansi(cls[start])):
-                    # a lone, unbreakable ruby unit: let the line overflow
-                    # rather than push 。」 etc. to the start of the next line
-                    while end < n and not good_break(end):
-                        end += 1
+        end = _chunk_end(cls, ws, start, limit, rules, ruby, nobreak)
         chunks.append(_Unit("".join(cls[start:end]), sum(ws[start:end])))
         start = end
     return chunks
@@ -1132,19 +1276,24 @@ def _wrap_line(
                 continue
         if cur:
             flush()
-        if break_long_words:
-            while u.width - u.hang > limit():
-                pieces = _split_long(
-                    u, limit(), ambiguous_width, rules, ruby, ruby_width
-                )
-                if len(pieces) < 2:
+        if break_long_words and u.width - u.hang > limit():
+            # Split the clusters once and walk them by index, so a long
+            # word takes linear time (#43).
+            cls, ws, nobreak = _split_prep(u, ambiguous_width, ruby, ruby_width, rules)
+            n = len(cls)
+            start = 0
+            rest = u.width
+            while rest - u.hang > limit():
+                end = _chunk_end(cls, ws, start, limit(), rules, ruby, nobreak)
+                if end >= n:
                     break
-                lines.append(pieces[0].text)
-                u = _Unit(
-                    "".join(x.text for x in pieces[1:]),
-                    sum(x.width for x in pieces[1:]),
-                    hang=u.hang,
-                )
+                lines.append("".join(cls[start:end]))
+                if start == 0:
+                    rest = sum(ws)
+                rest -= sum(ws[start:end])
+                start = end
+            if start:
+                u = _Unit("".join(cls[start:]), rest, hang=u.hang)
         cur = [u]
         cur_w = u.width
     if cur or not lines:

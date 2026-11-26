@@ -192,7 +192,13 @@ rules = ja.replace(no_start=ja.no_start - {"ー"})   # 「ー」の行頭を許�
 kinsoku.wrap("あいーう", 4, rules=rules)       # => ['あい', 'ーう']
 ```
 
-`KinsokuRules(no_start=..., no_end=..., hangable=...)` は frozen な dataclass で、各フィールドには文字列などの文字の集まりを渡せます（`frozenset` に変換されます）。プリセットの一覧は `kinsoku.PRESETS` です。
+`KinsokuRules(no_start=..., no_end=..., hangable=..., quotes=...)` は frozen な dataclass で、各フィールドには文字列などの文字の集まりを渡せます（`frozenset` に変換されます）。プリセットの一覧は `kinsoku.PRESETS` です。
+
+`quotes`（既定は `"` と `'`）は、開きと閉じが同じ字形の半角クォートです。和文の中では前後の文字から開き・閉じを判定し、開きは次の文字に、閉じは前の文字にくっつけるので、行末・行頭に1つだけ取り残されません（全プリセット共通）。英単語の中（`don't`）や英文の折り返しは変わりません。`quotes=""` で無効にできます。
+
+```python
+kinsoku.wrap('彼は"テスト"と言った', 6)   # => ['彼は', '"テス', 'ト"と', '言った']
+```
 
 ### 色を行ごとに閉じる（ansi_reflow）
 
@@ -361,7 +367,7 @@ applies Japanese line-breaking rules:
   (CLI: `--tategaki HEIGHT`)
 - `rules=` selects a kinsoku preset (`ja` (default), `strict`, `loose`,
   `zh-hans`, `zh-hant`, `ko`; CLI `--rules`) or takes a custom
-  `KinsokuRules(no_start, no_end, hangable)`, e.g.
+  `KinsokuRules(no_start, no_end, hangable, quotes)`, e.g.
   `KinsokuRules.preset("ja").replace(...)`
 - `ansi_reflow=True` closes active colors / OSC 8 links at each line end and
   reopens them on the next line (also `ansi_reflow(lines)`, CLI `--ansi-reflow`)
