@@ -29,13 +29,29 @@ NO_START = frozenset(
     "ゝゞーァィゥェォッャュョヮヵヶぁぃぅぇぉっゃゅょゎゕゖ"
     "ㇰㇱㇲㇳㇴㇵㇶㇷㇸㇹㇺㇻㇼㇽㇾㇿ"
     "…‥・：；:;゛゜ヽヾ々〻‐゠–〜～%％"
+    "｡､｣･ｰﾞﾟｧｨｩｪｫｬｭｮｯ"
 )
 
 # 行末禁則: characters that must not end a line.
-NO_END = frozenset("(（[［{｛〔〈《「『【〘〖〝‘“｟«")
+NO_END = frozenset("(（[［{｛〔〈《「『【〘〖〝‘“｟«｢")
 
 # ぶら下げ可能: punctuation allowed to hang past the right margin.
 HANGABLE = frozenset("、。，．,.")
+
+# Halfwidth katakana and punctuation (U+FF61-FF9F).
+_HW_SMALL = "ｧｨｩｪｫｬｭｮｯ"
+# Halfwidth (semi-)voiced sound marks: always kept with the preceding char.
+_HW_SOUND = frozenset("ﾞﾟ")
+
+# Kinsoku punctuation that stays inside a word between ASCII word characters
+# (decimals, version numbers, digit grouping, URLs, file names).
+_INFIX = frozenset(".,:;!?%")
+# ASCII word characters that may surround infix punctuation
+_WORD_CH = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"
+)
+# characters that may follow infix punctuation (``/`` for ``https://``)
+_INFIX_NEXT = _WORD_CH | {"/"}
 
 
 @dataclass(frozen=True)
@@ -88,7 +104,7 @@ _SMALL_KANA = (
 )
 # Characters that CSS ``line-break: loose`` lets start a line: small kana,
 # the prolonged sound mark, iteration marks and hyphen-like characters.
-_LOOSE_ALLOWED = frozenset(_SMALL_KANA + "ー々〻ゝゞヽヾ‐゠–〜～")
+_LOOSE_ALLOWED = frozenset(_SMALL_KANA + "ー々〻ゝゞヽヾ‐゠–〜～" + _HW_SMALL + "ｰ")
 
 _ZH_NO_START = (
     "，。、．！？；：…‥·・"
@@ -702,6 +718,15 @@ def _base(cl: str) -> str:
     return cl[:1]
 
 
+def _last_base(word: List[str]) -> str:
+    """Base character of the last visible cluster of a word run."""
+    for c in reversed(word):
+        b = c if len(c) == 1 else _base(c)
+        if b:
+            return b
+    return ""
+
+
 def _first(text: str) -> str:
     return _base(text)
 
@@ -730,46 +755,56 @@ def _atoms(
 ) -> List[_Unit]:
     """Split text into atoms: spaces, word runs, single wide clusters.
 
+    A word run is a run of narrow clusters. Punctuation such as ``.`` ``,``
+    ``:`` that is a kinsoku character normally forms its own atom, but when
+    it sits between ASCII word characters (letters, digits, ``_``) --
+    ``v1.2.3``, ``1,000``, ``https://example.com``, ``config.yaml`` -- it
+    stays inside the word. Before a symbol (``foo."bar"``, ``end.)``) it
+    stays an atom of its own.
+    Halfwidth katakana are atoms of their own, like wide kana, and the
+    halfwidth sound marks ``ﾞ`` ``ﾟ`` always stick to the preceding cluster.
+
     A ruby notation (``ruby=True``) is one atom, or part of a latin word
     when its base text starts with a narrow character.
     """
     atoms: List[_Unit] = []
     word: List[str] = []  # clusters of the current word run
     word_w = 0
+    # (cluster, width) of infix punctuation after an ASCII word, kept in the
+    # word only if another ASCII word character follows
+    pend: List[Tuple[str, int]] = []
     append = atoms.append
     cw = _char_width
     no_start = rules.no_start
     no_end = rules.no_end
+    infix = _INFIX
+    wch = _WORD_CH
+    infix_next = _INFIX_NEXT
+    sound = _HW_SOUND
 
-    if ruby and "《" in text:
-        for cl, w in _pieces(text, ambiguous_width, True, ruby_width):
-            b = _base(cl)
-            s = strip_ansi(cl) if "\x1b" in cl else cl
-            if len(s) > 1 and s[0] in ("｜", "|") and "《" in s:
-                b = s[1]  # explicit ruby unit: classify by its base text
-            if b and b in _SPACES:
-                if word:
-                    append(_Unit("".join(word), word_w))
-                    word, word_w = [], 0
-                append(_Unit(cl, w or 1, space=True))
-            elif b and not keep_all and (
-                char_width(b, ambiguous_width) >= 2 or b in no_start or b in no_end
-            ):
-                if word:
-                    append(_Unit("".join(word), word_w))
-                    word, word_w = [], 0
-                append(_Unit(cl, w))
-            else:
-                word.append(cl)
-                word_w += w
+    def flush() -> None:
+        nonlocal word, word_w
         if word:
             append(_Unit("".join(word), word_w))
-        return atoms
+            word, word_w = [], 0
+        if pend:
+            for c, cwid in pend:
+                append(_Unit(c, cwid))
+            pend.clear()
 
-    for cl in _clusters(text):
+    if ruby and "《" in text:
+        src: Iterable = _ruby_items(text, ambiguous_width, ruby_width)
+        rmode = True
+    else:
+        src = _clusters(text)
+        rmode = False
+
+    for cl in src:
         # The width of a word run is the sum of its cluster widths, so each
         # cluster is measured exactly once.
-        if len(cl) == 1:  # the common case: a lone character, no escapes
+        if rmode:
+            cl, w, b, bw = cl
+        elif len(cl) == 1:  # the common case: a lone character, no escapes
             b = cl
             w = bw = cw(cl, ambiguous_width)
         else:
@@ -777,21 +812,59 @@ def _atoms(
             w = width(cl, ambiguous_width)
             bw = char_width(b, ambiguous_width) if b else 0
         if b and b in _SPACES:
-            if word:
-                append(_Unit("".join(word), word_w))
-                word, word_w = [], 0
+            if word or pend:
+                flush()
             append(_Unit(cl, w or 1, space=True))
-        elif b and not keep_all and (bw >= 2 or b in no_start or b in no_end):
-            if word:
-                append(_Unit("".join(word), word_w))
-                word, word_w = [], 0
-            append(_Unit(cl, w))
+        elif b and not keep_all and (
+            bw >= 2 or b in no_start or b in no_end or "\uff61" <= b <= "\uff9f"
+        ):
+            if b in sound:
+                # ﾞ ﾟ: never separated from the preceding cluster
+                if pend:
+                    flush()
+                if word:
+                    word.append(cl)
+                    word_w += w
+                elif atoms and not atoms[-1].space:
+                    atoms[-1].text += cl
+                    atoms[-1].width += w
+                else:
+                    append(_Unit(cl, w))
+            elif b in infix and bw == 1 and not pend and _last_base(word) in wch:
+                pend.append((cl, w))
+            else:
+                if word or pend:
+                    flush()
+                append(_Unit(cl, w))
         else:
+            if pend:
+                if not b:  # escape-only cluster: decide on the next character
+                    pend.append((cl, w))
+                    continue
+                if b in infix_next:
+                    for c, cwid in pend:
+                        word.append(c)
+                        word_w += cwid
+                    pend.clear()
+                else:
+                    flush()
             word.append(cl)
             word_w += w
-    if word:
-        append(_Unit("".join(word), word_w))
+    if word or pend:
+        flush()
     return atoms
+
+
+def _ruby_items(
+    text: str, ambiguous_width: int, ruby_width: str
+) -> Iterator[Tuple[str, int, str, int]]:
+    """``(cluster, width, base, base_width)`` for :func:`_atoms` with ruby."""
+    for cl, w in _pieces(text, ambiguous_width, True, ruby_width):
+        b = _base(cl)
+        s = strip_ansi(cl) if "\x1b" in cl else cl
+        if len(s) > 1 and s[0] in ("｜", "|") and "《" in s:
+            b = s[1]  # explicit ruby unit: classify by its base text
+        yield cl, w, b, char_width(b, ambiguous_width) if b else 0
 
 
 def _glue(
@@ -846,6 +919,8 @@ def _split_long(
     else:
         cls = list(_clusters(u.text))
         ws = [width(c, ambiguous_width) for c in cls]
+    if "ﾞ" in u.text or "ﾟ" in u.text:
+        cls, ws = _join_sound_marks(cls, ws)
 
     def good_break(i: int) -> bool:
         # breaking before cls[i] respects kinsoku
@@ -877,6 +952,22 @@ def _split_long(
         chunks.append(_Unit("".join(cls[start:end]), sum(ws[start:end])))
         start = end
     return chunks
+
+
+def _join_sound_marks(
+    cls: List[str], ws: List[int]
+) -> Tuple[List[str], List[int]]:
+    """Merge each halfwidth ﾞ / ﾟ into the preceding cluster."""
+    out_c: List[str] = []
+    out_w: List[int] = []
+    for c, w in zip(cls, ws):
+        if out_c and _base(c) in _HW_SOUND:
+            out_c[-1] += c
+            out_w[-1] += w
+        else:
+            out_c.append(c)
+            out_w.append(w)
+    return out_c, out_w
 
 
 def _wrap_line(
@@ -1135,6 +1226,9 @@ def _cut_for_placeholder(
     if pw > width_:
         raise ValueError("placeholder is wider than width")
     pieces = list(_pieces(line, aw, ruby, ruby_width))
+    if "ﾞ" in line or "ﾟ" in line:
+        cls, ws = _join_sound_marks([c for c, _ in pieces], [w for _, w in pieces])
+        pieces = list(zip(cls, ws))
     total = sum(w for _, w in pieces)
     while pieces and (
         total + pw > width_
