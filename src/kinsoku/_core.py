@@ -7,6 +7,7 @@ import re
 import unicodedata
 import dataclasses
 from dataclasses import dataclass
+from bisect import bisect_right
 from functools import lru_cache
 from itertools import repeat
 from types import MappingProxyType
@@ -303,6 +304,15 @@ class _AnsiState:
         return c
 
 
+def _close_after(text: str) -> str:
+    """Sequence that closes the SGR / OSC 8 state left open by ``text``."""
+    if "\x1b" not in text:
+        return ""
+    state = _AnsiState()
+    state.feed_text(text)
+    return state.close()
+
+
 def _reflow_body(body: str, state: _AnsiState) -> str:
     """Re-open ``state`` before ``body``, update it, close it at the end."""
     if not body:
@@ -353,9 +363,117 @@ def _char_width(ch: str, ambiguous_width: int) -> int:
     return 1
 
 
+# --- emoji sequences ----------------------------------------------------------
+
+# Extended_Pictographic (Unicode emoji-data.txt, emoji 15.1), as (first, last)
+# code point ranges.  The standard library has no such data, so we keep our
+# own table.  Covered: the pictographic code points of Latin-1 (© ®), General
+# Punctuation (‼ ⁉), Letterlike Symbols (™ ℹ), Arrows, Misc Technical (⌚ ⏩
+# …), Enclosed Alphanumerics (Ⓜ), Geometric Shapes, Misc Symbols, Dingbats,
+# Supplemental Arrows-B, Misc Symbols and Arrows (⬅ ⭐ ⭕), CJK Symbols (〰 〽),
+# Enclosed CJK (㊗ ㊙), and the whole emoji planes U+1F000–1FAFF (Mahjong,
+# Domino, Playing Cards, Enclosed Alphanumeric/Ideographic Supplement, Misc
+# Symbols and Pictographs, Emoticons, Transport, Geometric Shapes Extended,
+# Supplemental Symbols and Pictographs, Symbols and Pictographs Extended-A)
+# plus the reserved U+1FC00–1FFFD.  Regional indicators (U+1F1E6–1F1FF) and
+# skin tone modifiers (U+1F3FB–1F3FF) are excluded, as in the Unicode data.
+_EXT_PICT = (
+    (0x00A9, 0x00A9), (0x00AE, 0x00AE), (0x203C, 0x203C), (0x2049, 0x2049),
+    (0x2122, 0x2122), (0x2139, 0x2139), (0x2194, 0x2199), (0x21A9, 0x21AA),
+    (0x231A, 0x231B), (0x2328, 0x2328), (0x2388, 0x2388), (0x23CF, 0x23CF),
+    (0x23E9, 0x23F3), (0x23F8, 0x23FA), (0x24C2, 0x24C2), (0x25AA, 0x25AB),
+    (0x25B6, 0x25B6), (0x25C0, 0x25C0), (0x25FB, 0x25FE), (0x2600, 0x2605),
+    (0x2607, 0x2612), (0x2614, 0x2685), (0x2690, 0x2705), (0x2708, 0x2712),
+    (0x2714, 0x2714), (0x2716, 0x2716), (0x271D, 0x271D), (0x2721, 0x2721),
+    (0x2728, 0x2728), (0x2733, 0x2734), (0x2744, 0x2744), (0x2747, 0x2747),
+    (0x274C, 0x274C), (0x274E, 0x274E), (0x2753, 0x2755), (0x2757, 0x2757),
+    (0x2763, 0x2767), (0x2795, 0x2797), (0x27A1, 0x27A1), (0x27B0, 0x27B0),
+    (0x27BF, 0x27BF), (0x2934, 0x2935), (0x2B05, 0x2B07), (0x2B1B, 0x2B1C),
+    (0x2B50, 0x2B50), (0x2B55, 0x2B55), (0x3030, 0x3030), (0x303D, 0x303D),
+    (0x3297, 0x3297), (0x3299, 0x3299),
+    (0x1F000, 0x1F0FF), (0x1F10D, 0x1F10F), (0x1F12F, 0x1F12F),
+    (0x1F16C, 0x1F171), (0x1F17E, 0x1F17F), (0x1F18E, 0x1F18E),
+    (0x1F191, 0x1F19A), (0x1F1AD, 0x1F1E5), (0x1F201, 0x1F20F),
+    (0x1F21A, 0x1F21A), (0x1F22F, 0x1F22F), (0x1F232, 0x1F23A),
+    (0x1F23C, 0x1F23F), (0x1F249, 0x1F3FA), (0x1F400, 0x1F53D),
+    (0x1F546, 0x1F64F), (0x1F680, 0x1F6FF), (0x1F774, 0x1F77F),
+    (0x1F7D5, 0x1F7FF), (0x1F80C, 0x1F80F), (0x1F848, 0x1F84F),
+    (0x1F85A, 0x1F85F), (0x1F888, 0x1F88F), (0x1F8AE, 0x1F8FF),
+    (0x1F90C, 0x1F93A), (0x1F93C, 0x1F945), (0x1F947, 0x1FAFF),
+    (0x1FC00, 0x1FFFD),
+)
+_EXT_PICT_STARTS = tuple(a for a, _ in _EXT_PICT)
+
+_ZWJ = "‍"
+_VS15 = "︎"
+_VS16 = "️"
+_KEYCAP = "⃣"
+_KEYCAP_BASES = frozenset("#*0123456789")
+
+# Any character that can make a cluster's width differ from the sum of its
+# code point widths.  Text without these is measured per code point.
+_EMOJI_SEQ_RE = re.compile(
+    "[‍︎️⃣\U0001F1E6-\U0001F1FF"
+    "\U0001F3FB-\U0001F3FF\U000E0020-\U000E007F]"
+)
+
+
+def _is_ext_pict(ch: str) -> bool:
+    """Whether ``ch`` is Extended_Pictographic (see :data:`_EXT_PICT`)."""
+    cp = ord(ch)
+    if cp < 0xA9:
+        return False
+    i = bisect_right(_EXT_PICT_STARTS, cp) - 1
+    return i >= 0 and cp <= _EXT_PICT[i][1]
+
+
+@lru_cache(maxsize=8192)
+def _cluster_kind(ch: str) -> int:
+    """How ``ch`` joins the cluster before it: 0 starts a new cluster,
+    1 extends it (zero width, skin tone modifier), 2 is a regional indicator."""
+    if "\U0001F1E6" <= ch <= "\U0001F1FF":
+        return 2
+    if "\U0001F3FB" <= ch <= "\U0001F3FF":
+        return 1
+    return 1 if _char_width(ch, 1) == 0 and ch != "\t" else 0
+
+
+@lru_cache(maxsize=4096)
+def _cluster_width(cl: str, ambiguous_width: int) -> int:
+    """Display width of one grapheme cluster (no escape sequences).
+
+    A cluster shown as an emoji is 2 columns wide: an emoji ZWJ sequence, an
+    emoji with a skin tone modifier, a tag sequence (🏴󠁧󠁢󠁥󠁮󠁧󠁿), an emoji
+    presentation sequence (VS16, as in ❤️), a keycap (1️⃣) and a flag (a pair
+    of regional indicators).  With VS15 (text presentation) the cluster keeps
+    the width of its characters.  Emoji sequences must start with an
+    Extended_Pictographic character (or ``#*0-9`` for keycaps); anything
+    else is the sum of its characters' widths.
+    """
+    plain = sum(map(_char_width, cl, repeat(ambiguous_width)))
+    if len(cl) == 1 or not _EMOJI_SEQ_RE.search(cl):
+        return plain
+    base = cl[0]
+    if "\U0001F1E6" <= base <= "\U0001F1FF":
+        if len(cl) >= 2 and "\U0001F1E6" <= cl[1] <= "\U0001F1FF":
+            return 2  # flag
+        return plain
+    if _VS15 in cl and _VS16 not in cl and _ZWJ not in cl:
+        return plain  # text presentation: the characters' own width
+    if base in _KEYCAP_BASES:
+        if _VS16 in cl or _KEYCAP in cl:
+            return 2  # keycap / emoji digit
+        return plain
+    if _is_ext_pict(base):
+        return 2  # VS16, skin tone, ZWJ or tag sequence on an emoji
+    return plain
+
+
 def width(text: str, ambiguous_width: int = 1, *, tabsize: int = 8) -> int:
     """Return the display width of ``text`` in terminal columns.
 
+    The width is the sum of the widths of its grapheme clusters, so emoji
+    sequences (ZWJ, skin tones, VS16, keycaps, flags) count as 2 columns.
     ANSI escape sequences are ignored. A tab advances to the next multiple
     of ``tabsize`` columns (counted by display width from the start of the
     line, wide characters as 2), so the result is the width of ``text``
@@ -368,7 +486,11 @@ def width(text: str, ambiguous_width: int = 1, *, tabsize: int = 8) -> int:
         text = strip_ansi(text)
     if text.isascii() and text.isprintable():
         return len(text)
-    return sum(map(_char_width, text, repeat(ambiguous_width)))
+    if _EMOJI_SEQ_RE.search(text) is None:
+        return sum(map(_char_width, text, repeat(ambiguous_width)))
+    return sum(
+        _cluster_width(cl, ambiguous_width) for cl in _clusters_plain(text)
+    )
 
 
 _TAB_SPLIT_RE = re.compile(r"(\t|\r\n|\n|\r)")
@@ -400,17 +522,22 @@ def _expand_tabs(text: str, tabsize: int, ambiguous_width: int) -> str:
 
 
 def _clusters(text: str) -> Iterator[str]:
-    """Yield rough grapheme clusters: a base char plus trailing zero-width chars.
+    """Yield grapheme clusters.
 
-    ANSI escape sequences are kept intact and attached to a neighbouring
-    cluster, so they are never split and never counted.
+    A cluster is a base character plus trailing zero-width characters
+    (combining marks, variation selectors, keycap, tags), skin tone
+    modifiers, and anything joined by ZWJ; two regional indicators form one
+    flag.  ANSI escape sequences are kept intact and attached to a
+    neighbouring cluster, so they are never split and never counted.
     """
     if "\x1b" not in text:
         yield from _clusters_plain(text)
         return
+    kind = _cluster_kind
     buf = ""
     prefix = ""  # escapes seen before any base char of the next cluster
     joiner = False
+    ri_open = False  # buf is a lone regional indicator
     pos = 0
     n = len(text)
     while pos < n:
@@ -425,15 +552,17 @@ def _clusters(text: str) -> Iterator[str]:
                 pos = m.end()
                 continue
         pos += 1
-        zero = char_width(ch) == 0 and ch != "\t"
-        if buf and (zero or joiner):
+        k = kind(ch)
+        if buf and (joiner or k == 1 or (k == 2 and ri_open)):
             buf += ch
+            ri_open = False
         else:
             if buf:
                 yield buf
             buf = prefix + ch
             prefix = ""
-        joiner = ch == "\u200d"
+            ri_open = k == 2
+        joiner = ch == _ZWJ
     if buf or prefix:
         yield buf + prefix
 
@@ -443,17 +572,21 @@ def _clusters_plain(text: str) -> Iterator[str]:
     if text.isascii() and text.isprintable():
         yield from text
         return
-    cw = _char_width
+    kind = _cluster_kind
     buf = ""
     joiner = False
+    ri_open = False
     for ch in text:
-        if buf and (joiner or (cw(ch, 1) == 0 and ch != "\t")):
+        k = kind(ch)
+        if buf and (joiner or k == 1 or (k == 2 and ri_open)):
             buf += ch
+            ri_open = False
         else:
             if buf:
                 yield buf
             buf = ch
-        joiner = ch == "‍"
+            ri_open = k == 2
+        joiner = ch == _ZWJ
     if buf:
         yield buf
 
@@ -907,9 +1040,9 @@ def wrap(
             body = _cut_for_placeholder(
                 out[-1], width, placeholder, ambiguous_width, rules, ruby, ruby_width
             )
-            if "\x1b" in out[-1]:
-                body += "\x1b[0m"
-            out[-1] = body + placeholder
+            # close whatever is open at the cut (styling may come from
+            # earlier lines, since they are printed one after another)
+            out[-1] = body + _close_after("".join(out[:-1]) + body) + placeholder
         return out
 
     state = _AnsiState()
@@ -978,8 +1111,10 @@ def truncate(
 ) -> str:
     """Cut ``text`` to fit in ``width`` columns, appending ``placeholder``.
 
-    ANSI escape sequences are kept intact; if any are present and the text is
-    cut, a reset sequence is inserted before the placeholder.
+    ANSI escape sequences are kept intact.  If the text is cut while SGR
+    attributes or an OSC 8 hyperlink are active, they are closed (the link
+    with its original BEL or ST terminator) before the placeholder; nothing
+    is added when nothing is open.
     """
     if _w(text, ambiguous_width) <= width:
         return text
@@ -995,9 +1130,7 @@ def truncate(
         parts.append(cl)
         bw += cw
     buf = "".join(parts)
-    if "\x1b" in text:
-        buf += "\x1b[0m"
-    return buf + placeholder
+    return buf + _close_after(buf) + placeholder
 
 
 def pad(

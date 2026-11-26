@@ -135,12 +135,14 @@ class KinsokuWrapper(textwrap.TextWrapper):
         initial_indent = self.initial_indent
         if "\n" not in text and "\r" not in text:
             # Single paragraph: keep leading whitespace like textwrap does
-            # (kinsoku.wrap would drop it) by moving it into the indent.
+            # (kinsoku.wrap may drop it) by moving it into the indent.  The
+            # body passed on never starts with spaces, so this works whether
+            # or not kinsoku.wrap keeps them itself.
             body = text.lstrip(" ")
             lead = text[: len(text) - len(body)]
-            if lead and _width(initial_indent + lead, self.ambiguous_width) < self.width:
+            if lead and self._keep_lead(initial_indent, lead, body):
                 initial_indent += lead
-                text = body
+            text = body
         return _wrap(
             text,
             self.width,
@@ -154,6 +156,29 @@ class KinsokuWrapper(textwrap.TextWrapper):
             ambiguous_width=self.ambiguous_width,
             **self.extra,
         )
+
+    def _first_word_fits(self, indent: str, body: str) -> bool:
+        """Whether the first word of ``body`` fits on a line after ``indent``."""
+        word = body.split(" ", 1)[0]
+        kw = dict(self.extra)
+        kw.update(hanging=self.hanging, keep_all=self.keep_all,
+                  ambiguous_width=self.ambiguous_width, break_long_words=False)
+        first = _wrap(word, self.width, initial_indent=indent, **kw)[0]
+        return _width(first, self.ambiguous_width) <= self.width
+
+    def _keep_lead(self, indent: str, lead: str, body: str) -> bool:
+        """Decide whether the leading whitespace ``lead`` moves into the indent.
+
+        Like textwrap, it is kept unless it would push a first word that
+        otherwise fits onto a forced break; then it is dropped (#31).
+        """
+        if _width(indent + lead, self.ambiguous_width) >= self.width:
+            return False
+        if self._first_word_fits(indent + lead, body):
+            return True
+        # the word does not fit even without the lead: textwrap keeps the
+        # lead when it breaks the word anyway, and drops it otherwise
+        return self.break_long_words and not self._first_word_fits(indent, body)
 
     def fill(self, text: str) -> str:
         """Wrap ``text`` and return a single string joined by newlines."""
