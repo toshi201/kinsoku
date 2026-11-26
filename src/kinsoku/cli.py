@@ -92,6 +92,7 @@ _OPTIONS = (
     ("--no-header", "no_header", False),
     ("--style", "style", "simple"),
     ("--placeholder", "placeholder", None),
+    ("--balance", "balance", False),
 )
 
 _WRAP_OPTS = frozenset(
@@ -114,7 +115,7 @@ _WRAP_OPTS = frozenset(
 # The options each mode accepts ("" is plain wrapping). --encoding and the
 # input files are accepted everywhere.
 _MODE_OPTIONS = {
-    "": _WRAP_OPTS | {"ruby", "ruby_width"},
+    "": _WRAP_OPTS | {"ruby", "ruby_width", "balance"},
     "--truncate": frozenset({"width", "placeholder", "ambiguous_width", "tabsize"}),
     "--width-of": frozenset({"ambiguous_width", "tabsize"}),
     # --ruby: the ruby annotations are removed (strip_ruby) before layout
@@ -139,6 +140,7 @@ _MODE_OPTIONS = {
         "ruby_width",
         "indent_marks_paragraph",
         "cjk_latin_space",
+        "balance",
     },
 }
 
@@ -257,6 +259,11 @@ def _main(argv: list[str] | None) -> int:
     )
     p.add_argument(
         "--tabsize", type=int, default=8, help="expand tabs to multiples of N columns (default: 8)"
+    )
+    p.add_argument(
+        "--balance",
+        action="store_true",
+        help="even out the line lengths (same number of lines as the default wrapping)",
     )
     mode = p.add_mutually_exclusive_group()
     mode.add_argument(
@@ -427,6 +434,7 @@ def _main(argv: list[str] | None) -> int:
                 tabsize=args.tabsize,
                 ruby=args.ruby,
                 ruby_width=args.ruby_width,
+                balance=args.balance,
             )
         except ValueError as e:
             p.error(str(e))
@@ -450,6 +458,7 @@ def _main(argv: list[str] | None) -> int:
             ruby=args.ruby,
             ruby_width=args.ruby_width,
             tabsize=args.tabsize,
+            balance=args.balance,
         )
     except ValueError as e:
         p.error(str(e))
