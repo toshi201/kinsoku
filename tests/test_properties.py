@@ -91,7 +91,9 @@ def _paragraph_lines(text, kw):
     for para in text.splitlines() or [""]:
         lines = wrap(para, **kw)
         for i, line in enumerate(lines):
-            yield _strip_indent(line, kw, i == 0) if line else line, i == 0
+            # visually empty lines (escapes only) get no indent (#34)
+            yield (_strip_indent(line, kw, i == 0) if strip_ansi(line) else line,
+                   i == 0)
 
 
 # --- 1. never raises ----------------------------------------------------------
@@ -186,9 +188,9 @@ def test_kinsoku_respected(text, w, hanging, break_long_words, aw):
 @SETTINGS
 @given(texts(ansi=True), wrap_kwargs())
 def test_ansi_transparent(text, kw):
-    # Paragraphs consisting only of escape sequences are covered by the
-    # xfail regression test below (#34).
-    assume(not any(p and not strip_ansi(p) for p in text.splitlines()))
+    # A trailing escape-only paragraph ("a\n\x1b[0m") disappears entirely
+    # when the escapes are stripped, so the paragraph counts differ.
+    assume(len(text.splitlines()) == len(strip_ansi(text).splitlines()))
     assert [strip_ansi(l) for l in wrap(text, **kw)] == wrap(strip_ansi(text), **kw)
 
 
@@ -235,7 +237,6 @@ def test_max_lines(text, kw, max_lines):
 
 # --- regression tests for bugs found by the properties above -----------------
 
-@pytest.mark.xfail(strict=True, reason="#34")
 def test_escape_only_paragraph_gets_no_indent():
     # A paragraph made only of ANSI escapes is visually empty, like "".
     assert wrap("", 10, initial_indent="  ") == [""]

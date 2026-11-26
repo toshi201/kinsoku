@@ -119,8 +119,10 @@ def test_width_is_sum_of_char_widths(ambiguous_width):
 def test_fast_paths_match_general_path():
     for cp in range(0x3100):
         ch = chr(cp)
+        if ch == "\t":
+            continue  # width() expands tabs (#29); char_width("\t") is 0
         assert kinsoku.width(ch) == kinsoku.char_width(ch)
         assert kinsoku.width(ch * 3) == 3 * kinsoku.char_width(ch)
     assert kinsoku.width("hello world") == 11
-    assert kinsoku.width("tab\there") == 7
+    assert kinsoku.width("tab\there") == 12  # tab to column 8 (#29)
     assert kinsoku.width("") == 0
