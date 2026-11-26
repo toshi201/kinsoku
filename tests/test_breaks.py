@@ -68,6 +68,41 @@ def test_infix_inside_ruby_text():
     ]
 
 
+# infix punctuation followed by a symbol is not part of the word: the word
+# is not lengthened (and force-split) by the symbols after it
+@pytest.mark.parametrize(
+    "text, w, rules, expected",
+    [
+        ('foo."bar" baz', 6, "ja", ["foo.", '"bar"', "baz"]),
+        ("see end.) next", 5, "ja", ["see", "end.)", "next"]),
+        ('a,"b" c', 3, "ja", ["a,", '"b"', "c"]),
+        ("x:(y) z", 3, "ja", ["x:", "(y)", "z"]),
+        ("文末はok.」です", 6, "ja", ["文末は", "ok.」", "です"]),
+        ("foo..bar", 5, "ja", ["foo..", "bar"]),
+        # ANSI escapes around the punctuation
+        ("\x1b[1mfoo\x1b[0m.\"bar\" baz", 6, "ja",
+         ["\x1b[1mfoo\x1b[0m.", '"bar"', "baz"]),
+        ("foo.\x1b[31m\"bar\"\x1b[0m baz", 6, "ja",
+         ["foo.\x1b[31m", '"bar"\x1b[0m', "baz"]),
+        # zh-hans preset
+        ('foo."bar" baz', 6, "zh-hans", ["foo.", '"bar"', "baz"]),
+        ("x:(y) z", 3, "zh-hans", ["x:", "(y)", "z"]),
+        ("价格是1,000元。", 8, "zh-hans", ["价格是", "1,000", "元。"]),
+    ],
+)
+def test_infix_followed_by_symbol(text, w, rules, expected):
+    assert wrap(text, w, rules=rules) == expected
+
+
+@pytest.mark.parametrize("rules", PRESET_NAMES)
+def test_infix_word_with_ansi(rules):
+    text = "\x1b[1mv1\x1b[0m.\x1b[2m2.3\x1b[0m ok"
+    assert wrap(text, 7, rules=rules) == ["\x1b[1mv1\x1b[0m.\x1b[2m2.3\x1b[0m", "ok"]
+    assert wrap("円周率は\x1b[31m3\x1b[0m.14です", 9, rules=rules) == [
+        "円周率は\x1b[31m", "3\x1b[0m.14です"
+    ]
+
+
 # --- #24: halfwidth katakana and punctuation -----------------------------------
 
 @pytest.mark.parametrize("rules", ["ja", "strict", "loose"])

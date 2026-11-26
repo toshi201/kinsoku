@@ -45,6 +45,12 @@ _HW_SOUND = frozenset("ﾞﾟ")
 # Kinsoku punctuation that stays inside a word between ASCII word characters
 # (decimals, version numbers, digit grouping, URLs, file names).
 _INFIX = frozenset(".,:;!?%")
+# ASCII word characters that may surround infix punctuation
+_WORD_CH = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"
+)
+# characters that may follow infix punctuation (``/`` for ``https://``)
+_INFIX_NEXT = _WORD_CH | {"/"}
 
 
 @dataclass(frozen=True)
@@ -626,6 +632,15 @@ def _base(cl: str) -> str:
     return cl[:1]
 
 
+def _last_base(word: List[str]) -> str:
+    """Base character of the last visible cluster of a word run."""
+    for c in reversed(word):
+        b = c if len(c) == 1 else _base(c)
+        if b:
+            return b
+    return ""
+
+
 def _first(text: str) -> str:
     return _base(text)
 
@@ -656,8 +671,10 @@ def _atoms(
 
     A word run is a run of narrow clusters. Punctuation such as ``.`` ``,``
     ``:`` that is a kinsoku character normally forms its own atom, but when
-    it sits between ASCII word characters (``v1.2.3``, ``1,000``,
-    ``https://example.com``, ``config.yaml``) it stays inside the word.
+    it sits between ASCII word characters (letters, digits, ``_``) --
+    ``v1.2.3``, ``1,000``, ``https://example.com``, ``config.yaml`` -- it
+    stays inside the word. Before a symbol (``foo."bar"``, ``end.)``) it
+    stays an atom of its own.
     Halfwidth katakana are atoms of their own, like wide kana, and the
     halfwidth sound marks ``ﾞ`` ``ﾟ`` always stick to the preceding cluster.
 
@@ -675,6 +692,8 @@ def _atoms(
     no_start = rules.no_start
     no_end = rules.no_end
     infix = _INFIX
+    wch = _WORD_CH
+    infix_next = _INFIX_NEXT
     sound = _HW_SOUND
 
     def flush() -> None:
@@ -725,7 +744,7 @@ def _atoms(
                     atoms[-1].width += w
                 else:
                     append(_Unit(cl, w))
-            elif b in infix and bw == 1 and (pend or (word and word[-1].isascii())):
+            elif b in infix and bw == 1 and not pend and _last_base(word) in wch:
                 pend.append((cl, w))
             else:
                 if word or pend:
@@ -733,7 +752,10 @@ def _atoms(
                 append(_Unit(cl, w))
         else:
             if pend:
-                if b.isascii():
+                if not b:  # escape-only cluster: decide on the next character
+                    pend.append((cl, w))
+                    continue
+                if b in infix_next:
                     for c, cwid in pend:
                         word.append(c)
                         word_w += cwid
