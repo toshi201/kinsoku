@@ -41,6 +41,13 @@ _INFIX = frozenset(".,:;!?%")
 _WORD_CH = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_")
 # characters that may follow infix punctuation (``/`` for ``https://``)
 _INFIX_NEXT = _WORD_CH | {"/"}
+# ASCII brackets that stay inside a word when the opening one directly
+# follows an ASCII word character (``print(x)``, ``a[0]``, ``f{x}``, #65)
+_BRACKETS = {"(": ")", "[": "]", "{": "}"}
+_CLOSERS = frozenset(_BRACKETS.values())
+# characters after which infix punctuation or an opening bracket stays in
+# the word: word characters and a closing bracket kept in the word
+_WORD_END = _WORD_CH | _CLOSERS
 
 
 @dataclass(frozen=True, init=False)
@@ -871,6 +878,10 @@ def _atoms(
     ``v1.2.3``, ``1,000``, ``https://example.com``, ``config.yaml`` -- it
     stays inside the word. Before a symbol (``foo."bar"``, ``end.)``) it
     stays an atom of its own.
+    An ASCII opening bracket ``(`` ``[`` ``{`` right after an ASCII word
+    character, and its matching closing bracket, stay inside the word too
+    (``print(x)``, ``a[0]``, ``foo.bar.baz()``); a bracket before a word
+    (``(see above)``, ``言った(笑)``) is an atom as before.
     Halfwidth katakana are atoms of their own, like wide kana, and the
     halfwidth sound marks ``ﾞ`` ``ﾟ`` always stick to the preceding cluster.
 
@@ -883,17 +894,23 @@ def _atoms(
     # (cluster, width) of infix punctuation after an ASCII word, kept in the
     # word only if another ASCII word character follows
     pend: list[tuple[str, int]] = []
+    # closing brackets expected for the opening brackets kept in the word
+    opened: list[str] = []
     append = atoms.append
     cw = _char_width
     no_start = rules.no_start
     no_end = rules.no_end
     infix = _INFIX
-    wch = _WORD_CH
     infix_next = _INFIX_NEXT
+    word_end = _WORD_END
+    brackets = _BRACKETS
+    closers = _CLOSERS
     sound = _HW_SOUND
 
     def flush() -> None:
         nonlocal word, word_w
+        if opened:
+            opened.clear()
         if word:
             append(_Unit("".join(word), word_w))
             word, word_w = [], 0
@@ -950,7 +967,16 @@ def _atoms(
                     atoms[-1].width += w
                 else:
                     append(_Unit(cl, w))
-            elif b in infix and bw == 1 and not pend and _last_base(word) in wch:
+            elif b in brackets and bw == 1 and not pend and _last_base(word) in word_end:
+                # ``foo(``: the bracket is part of the word (#65)
+                opened.append(brackets[b])
+                word.append(cl)
+                word_w += w
+            elif b in closers and opened and not pend and b == opened[-1]:
+                opened.pop()
+                word.append(cl)
+                word_w += w
+            elif b in infix and bw == 1 and not pend and _last_base(word) in word_end:
                 pend.append((cl, w))
             else:
                 if word or pend:
