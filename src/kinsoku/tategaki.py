@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import List, Optional, Tuple
 
-from ._core import HANGABLE, NO_END, NO_START, char_width, strip_ansi
+from ._core import HANGABLE, NO_END, NO_START, _check_width, char_width, strip_ansi
 
 __all__ = ["tategaki", "VERTICAL_FORMS"]
 
@@ -161,10 +161,8 @@ def tategaki(
     - Zero-width / combining chars attach to the previous cell; ANSI escape
       sequences are removed.
     """
-    if height < 1:
-        raise ValueError("height must be >= 1")
-    if gap < 0:
-        raise ValueError("gap must be >= 0")
+    _check_width(height, "height")
+    _check_width(gap, "gap", allow_zero=True)
     if halfwidth not in _HALFWIDTH_MODES:
         raise ValueError(f"halfwidth must be one of {_HALFWIDTH_MODES!r}, not {halfwidth!r}")
     text = strip_ansi(text)

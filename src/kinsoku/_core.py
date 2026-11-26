@@ -16,6 +16,7 @@ from typing import (
     Iterable,
     Iterator,
     List,
+    Literal,
     Mapping,
     Optional,
     Tuple,
@@ -333,8 +334,55 @@ def ansi_reflow(lines: List[str]) -> List[str]:
     return [_reflow_body(line, state) for line in lines]
 
 
+# --- argument validation --------------------------------------------------------
+# Every public function checks its arguments with these helpers, so the same
+# bad value gives the same ValueError (with the same message) everywhere.
+
+Align = Literal["left", "right", "center", "<", ">", "^"]
+
+_ALIGNS = MappingProxyType({
+    "left": "left", "<": "left",
+    "right": "right", ">": "right",
+    "center": "center", "^": "center",
+})
+
+
+def _check_ambiguous_width(ambiguous_width: int) -> None:
+    """Raise ValueError unless ``ambiguous_width`` is 1 or 2."""
+    if ambiguous_width not in (1, 2):
+        raise ValueError(f"ambiguous_width must be 1 or 2, not {ambiguous_width!r}")
+
+
+def _check_width(value: int, name: str = "width", *, allow_zero: bool = False) -> None:
+    """Raise ValueError unless ``value`` is > 0 (>= 0 with ``allow_zero``)."""
+    if allow_zero:
+        if value < 0:
+            raise ValueError(f"invalid {name} {value!r} (must be >= 0)")
+    elif value < 1:
+        raise ValueError(f"invalid {name} {value!r} (must be > 0)")
+
+
+def _check_align(align: str) -> str:
+    """Return the canonical name (left, right, center) of ``align``.
+
+    ``"<"``, ``">"`` and ``"^"`` (as in :func:`format`) are accepted too.
+    """
+    try:
+        return _ALIGNS[align]
+    except (KeyError, TypeError):
+        raise ValueError(
+            f"unknown align {align!r} (choose from left, right, center)"
+        ) from None
+
+
+
 def char_width(ch: str, ambiguous_width: int = 1) -> int:
-    """Return the terminal display width (0, 1 or 2) of a single character."""
+    """Return the terminal display width (0, 1 or 2) of a single character.
+
+    :raises ValueError: if ``ambiguous_width`` is not 1 or 2.
+    """
+    if ambiguous_width not in (1, 2):
+        _check_ambiguous_width(ambiguous_width)
     if not ch:
         return 0
     if " " <= ch <= "~" and len(ch) == 1:  # printable ASCII fast path
@@ -479,7 +527,11 @@ def width(text: str, ambiguous_width: int = 1, *, tabsize: int = 8) -> int:
     line, wide characters as 2), so the result is the width of ``text``
     with its tabs expanded the way :func:`wrap` expands them.  Line breaks
     reset the tab column and count as zero width.
+
+    :raises ValueError: if ``ambiguous_width`` is not 1 or 2.
     """
+    if ambiguous_width not in (1, 2):
+        _check_ambiguous_width(ambiguous_width)
     if "\t" in text:
         text = _expand_tabs(text, tabsize, ambiguous_width)
     if "\x1b" in text:
@@ -996,16 +1048,19 @@ def wrap(
         ``expand_tabs=False`` any remaining tabs are expanded here with
         ``tabsize=8``.
 
+    A grapheme cluster is never split, so one that is wider than the room on
+    a line (a wide character such as ``"あ"`` with ``width=1``) is put on a
+    line of its own, and that line is wider than ``width``:
+    ``wrap("あいう", 1) == ["あ", "い", "う"]``.
+
     Whitespace at the start of a paragraph (e.g. a U+3000 字下げ or a code
     indent) is kept on its first line; it is dropped only when not even the
     first word fits after it.  Whitespace at a line break is dropped, but
     ANSI escapes attached to it stay at the end of the previous line.
     """
+    _check_width(width)
+    _check_ambiguous_width(ambiguous_width)
     rules = _resolve_rules(rules)
-    if width < 1:
-        raise ValueError(f"invalid width {width!r} (must be > 0)")
-    if ambiguous_width not in (1, 2):
-        raise ValueError("ambiguous_width must be 1 or 2")
     iw = _w(initial_indent, ambiguous_width)
     sw = _w(subsequent_indent, ambiguous_width)
     if width - iw < 1 or width - sw < 1:
@@ -1108,6 +1163,7 @@ def truncate(
     placeholder: str = "…",
     *,
     ambiguous_width: int = 1,
+    tabsize: int = 8,
 ) -> str:
     """Cut ``text`` to fit in ``width`` columns, appending ``placeholder``.
 
@@ -1115,7 +1171,20 @@ def truncate(
     attributes or an OSC 8 hyperlink are active, they are closed (the link
     with its original BEL or ST terminator) before the placeholder; nothing
     is added when nothing is open.
+
+    Tabs are expanded to spaces first, the same way :func:`width` counts
+    them (up to the next multiple of ``tabsize`` columns), so the result
+    contains no tabs.  A grapheme cluster is never split: if the next one
+    does not fit before the placeholder, it is left out whole.
+
+    :raises ValueError: if ``width`` is negative, ``ambiguous_width`` is not
+        1 or 2, or the text must be cut and ``placeholder`` is wider than
+        ``width``.
     """
+    _check_width(width, allow_zero=True)
+    _check_ambiguous_width(ambiguous_width)
+    if "\t" in text:
+        text = _expand_tabs(text, tabsize, ambiguous_width)
     if _w(text, ambiguous_width) <= width:
         return text
     pw = _w(placeholder, ambiguous_width)
@@ -1136,14 +1205,35 @@ def truncate(
 def pad(
     text: str,
     width: int,
-    align: str = "left",
+    align: Align = "left",
     fillchar: str = " ",
     *,
     ambiguous_width: int = 1,
+    tabsize: int = 8,
 ) -> str:
-    """Pad ``text`` to ``width`` columns. ``align`` is left, right or center."""
+    """Pad ``text`` with ``fillchar`` to ``width`` display columns.
+
+    :param align: ``"left"`` (default), ``"right"`` or ``"center"``; also
+        ``"<"``, ``">"`` and ``"^"`` as in :func:`format`.  It is checked
+        even when no padding is needed.
+    :param fillchar: a character of display width 1.
+    :param tabsize: tabs are expanded to spaces first, the same way
+        :func:`width` counts them, so the result contains no tabs.
+
+    ``text`` that is already ``width`` columns or wider is returned as it
+    is (with tabs expanded), not cut; use :func:`truncate` first to make it
+    fit, e.g. ``pad(truncate(s, 10), 10)``.
+
+    :raises ValueError: if ``width`` is negative, ``align`` is unknown,
+        ``ambiguous_width`` is not 1 or 2, or ``fillchar`` is not 1 column.
+    """
+    _check_width(width, allow_zero=True)
+    align = _check_align(align)
+    _check_ambiguous_width(ambiguous_width)
     if _w(fillchar, ambiguous_width) != 1:
         raise ValueError("fillchar must have display width 1")
+    if "\t" in text:
+        text = _expand_tabs(text, tabsize, ambiguous_width)
     gap = width - _w(text, ambiguous_width)
     if gap <= 0:
         return text
@@ -1151,10 +1241,8 @@ def pad(
         return text + fillchar * gap
     if align == "right":
         return fillchar * gap + text
-    if align == "center":
-        left = gap // 2
-        return fillchar * left + text + fillchar * (gap - left)
-    raise ValueError(f"unknown align {align!r}")
+    left = gap // 2
+    return fillchar * left + text + fillchar * (gap - left)
 
 
 _w = width
