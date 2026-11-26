@@ -88,7 +88,20 @@ kinsoku a.txt - b.txt                # - は標準入力。ファイルごとに
 ```
 
 `-w` を省略すると環境変数 `COLUMNS` → 端末幅 → 80 の順で幅を決めます。
-`--truncate` と `--width-of` は同時に指定できず、折り返し専用のオプション（`-n` `--hanging` など）と組み合わせるとエラーになります。
+`--truncate` `--width-of` `--tategaki` `--table` `--unwrap` `--rewrap` は同時に指定できません。
+そのモードで使えないオプションを指定すると、`kinsoku: error: --ruby cannot be used with --table` のようにエラー（終了コード 2）になります（既定値のままなら指定していない扱い）。
+
+| モード | 使えるオプション |
+| --- | --- |
+| 通常の折り返し | `-w` `--hanging` `--no-break-long-words` `--keep-all` `-i` `-s` `-n` `--placeholder` `--ambiguous-width` `--rules` `--ansi-reflow` `--ruby` `--ruby-width` `--tabsize` |
+| `--truncate` | `-w` `--placeholder` `--ambiguous-width` `--tabsize` |
+| `--width-of` | `--ambiguous-width` `--tabsize` |
+| `--tategaki` | `--gap` `--ruby`（ルビを取り除いて縦書きにする） |
+| `--table` | `-w` `--hanging` `--no-break-long-words` `--keep-all` `--ambiguous-width` `--rules` `--delimiter` `--no-header` `--style` |
+| `--unwrap` | `--indent-marks-paragraph` `--cjk-latin-space` |
+| `--rewrap` | 通常の折り返しのオプション（`--ruby` `--ruby-width` を含む）と `--indent-marks-paragraph` `--cjk-latin-space` |
+
+`--encoding` はどのモードでも使えます。UTF-8（既定）で読むときは、ファイル・標準入力それぞれの先頭の BOM（Excel の「CSV UTF-8」など）を取り除きます。
 
 ## textwrap からの移行
 
@@ -150,7 +163,7 @@ print(kinsoku.tategaki("令和8年12月25日", 5, halfwidth="pair"))   # 縦中�
 - 半角英数字は `halfwidth="fullwidth"`（既定）で全角に変換して1マスに1文字、`halfwidth="pair"` で2文字ずつ1マスに入れます（縦中横）
 - 禁則：`。」ャ` などは列頭に、`「（` などは列末に来ないよう前後の文字を次の列へ追い出します。`hanging=True`（既定）では `、。，．` を列の下に1マスぶら下げ、そのときは全列が `height + 1` 行になります
 - 結合文字・ゼロ幅文字は直前のマスに付け、ANSI エスケープ（色）は取り除きます
-- CLI: `kinsoku --tategaki 10 [--gap 2] novel.txt`
+- CLI: `kinsoku --tategaki 10 [--gap 2] novel.txt`。ルビ記法には対応していないので、青空文庫のテキストなどは `--ruby` を付けるとルビを取り除いて（`strip_ruby`）縦書きにします
 
 ### 言語別の禁則ルール
 
@@ -362,6 +375,7 @@ API: `width`, `char_width`, `strip_ansi`, `wrap`, `fill`, `shorten`, `truncate`,
 `KinsokuWrapper`, `dedent`, `indent`, `tategaki`, `KinsokuRules`, `PRESETS`, `ansi_reflow`, `unwrap`, `rewrap`, `table`,
 `strip_ruby`, `ruby_to_html`.
 CLI: `kinsoku -w N [FILE...]` (`-` = stdin; width defaults to `$COLUMNS`/terminal/80;
-`--encoding cp932` for Shift_JIS input; `--placeholder` for `--truncate` / `-n`).
+`--encoding cp932` for Shift_JIS input, a UTF-8 BOM is dropped; `--placeholder` for `--truncate` / `-n`;
+options a mode does not use are errors, `--tategaki --ruby` strips ruby).
 
 License: MIT

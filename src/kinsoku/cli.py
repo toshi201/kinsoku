@@ -11,7 +11,7 @@ import sys
 from typing import List, Optional
 
 from . import __version__
-from ._core import PRESETS, fill, truncate, width
+from ._core import PRESETS, fill, strip_ruby, truncate, width
 from .table import STYLES, table
 from .tategaki import tategaki
 from .unwrap import rewrap, unwrap
@@ -22,26 +22,94 @@ def _default_width() -> int:
     return shutil.get_terminal_size((80, 24)).columns
 
 
+def _input_encoding(encoding: str) -> str:
+    """UTF-8 input is read as utf-8-sig so that a leading BOM is dropped."""
+    return "utf-8-sig" if codecs.lookup(encoding).name == "utf-8" else encoding
+
+
 def _read_input(path: str, encoding: str) -> str:
     """Read one input ("-" is stdin). Raises OSError / UnicodeDecodeError."""
+    encoding = _input_encoding(encoding)
     if path == "-":
         buf = getattr(sys.stdin, "buffer", None)
         if buf is None:  # e.g. replaced by a StringIO
-            return sys.stdin.read()
+            text = sys.stdin.read()
+            if encoding == "utf-8-sig" and text.startswith("\ufeff"):
+                text = text[1:]
+            return text
         return buf.read().decode(encoding)
     with open(path, encoding=encoding) as f:
         return f.read()
 
 
-# Options that only make sense when wrapping (dest, default).
-_WRAP_ONLY = (
+# Mode-dependent options: (flag, dest, default). An option still at its
+# default counts as "not given".
+_OPTIONS = (
+    ("--width", "width", None),
     ("--hanging", "hanging", False),
     ("--no-break-long-words", "no_break_long_words", False),
     ("--keep-all", "keep_all", False),
     ("--indent", "indent", ""),
     ("--subsequent-indent", "subsequent_indent", ""),
     ("--max-lines", "max_lines", None),
+    ("--ambiguous-width", "ambiguous_width", 1),
+    ("--rules", "rules", "ja"),
+    ("--ansi-reflow", "ansi_reflow", False),
+    ("--ruby", "ruby", False),
+    ("--ruby-width", "ruby_width", "full"),
+    ("--tabsize", "tabsize", 8),
+    ("--gap", "gap", None),
+    ("--indent-marks-paragraph", "indent_marks_paragraph", False),
+    ("--cjk-latin-space", "cjk_latin_space", False),
+    ("--delimiter", "delimiter", None),
+    ("--no-header", "no_header", False),
+    ("--style", "style", "simple"),
+    ("--placeholder", "placeholder", None),
 )
+
+_WRAP_OPTS = frozenset({
+    "width", "hanging", "no_break_long_words", "keep_all", "indent",
+    "subsequent_indent", "max_lines", "placeholder", "ambiguous_width",
+    "rules", "ansi_reflow", "tabsize",
+})
+
+# The options each mode accepts ("" is plain wrapping). --encoding and the
+# input files are accepted everywhere.
+_MODE_OPTIONS = {
+    "": _WRAP_OPTS | {"ruby", "ruby_width"},
+    "--truncate": frozenset({"width", "placeholder", "ambiguous_width", "tabsize"}),
+    "--width-of": frozenset({"ambiguous_width", "tabsize"}),
+    # --ruby: the ruby annotations are removed (strip_ruby) before layout
+    "--tategaki": frozenset({"gap", "ruby"}),
+    "--table": frozenset({
+        "width", "hanging", "no_break_long_words", "keep_all",
+        "ambiguous_width", "rules", "delimiter", "no_header", "style",
+    }),
+    "--unwrap": frozenset({"indent_marks_paragraph", "cjk_latin_space"}),
+    "--rewrap": _WRAP_OPTS | {
+        "ruby", "ruby_width", "indent_marks_paragraph", "cjk_latin_space",
+    },
+}
+
+
+def _mode(args: argparse.Namespace) -> str:
+    if args.tategaki is not None:
+        return "--tategaki"
+    for flag in ("--truncate", "--width-of", "--unwrap", "--rewrap", "--table"):
+        if getattr(args, flag[2:].replace("-", "_")):
+            return flag
+    return ""
+
+
+def _check_options(p: argparse.ArgumentParser, args: argparse.Namespace, mode: str) -> None:
+    allowed = _MODE_OPTIONS[mode]
+    for opt, dest, default in _OPTIONS:
+        if dest in allowed or getattr(args, dest) == default:
+            continue
+        if mode:
+            p.error(f"{opt} cannot be used with {mode}")
+        modes = [m for m, a in _MODE_OPTIONS.items() if m and dest in a]
+        p.error(f"{opt} requires {' or '.join(modes)}")
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -105,7 +173,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--placeholder", default=None,
                    help="marker for cut text with --truncate / -n (default: …)")
     p.add_argument("--encoding", default="utf-8",
-                   help="input encoding (default: utf-8; e.g. cp932 / shift_jis "
+                   help="input encoding (default: utf-8, a leading BOM is removed; e.g. cp932 / shift_jis "
                         "for Aozora Bunko texts)")
     p.add_argument("--cjk-latin-space", action="store_true",
                    help="with --unwrap/--rewrap: put a space where CJK meets "
@@ -118,22 +186,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         p.error("width must be > 0")
     if args.max_lines is not None and args.max_lines < 1:
         p.error("--max-lines must be >= 1")
+    _check_options(p, args, _mode(args))
     tate = args.tategaki is not None
-    if args.truncate or args.width_of or tate:
-        flag = ("--truncate" if args.truncate
-                else "--width-of" if args.width_of else "--tategaki")
-        for opt, dest, default in _WRAP_ONLY:
-            if getattr(args, dest) != default:
-                p.error(f"{opt} cannot be used with {flag}")
-        if not args.truncate and args.placeholder is not None:
-            p.error(f"--placeholder cannot be used with {flag}")
     if tate:
         if args.tategaki < 1:
             p.error("--tategaki HEIGHT must be >= 1")
         if args.gap is not None and args.gap < 0:
             p.error("--gap must be >= 0")
-    elif args.gap is not None:
-        p.error("--gap requires --tategaki")
     placeholder = "…" if args.placeholder is None else args.placeholder
     try:
         codecs.lookup(args.encoding)
@@ -159,6 +218,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if tate:
         gap = 1 if args.gap is None else args.gap
+        if args.ruby:
+            text = strip_ruby(text)
         try:
             print(tategaki(text.rstrip("\n"), args.tategaki, gap=gap))
         except ValueError as e:
@@ -174,7 +235,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         try:
             for line in text.splitlines():
                 print(truncate(line, w, placeholder=placeholder,
-                               ambiguous_width=args.ambiguous_width))
+                               ambiguous_width=args.ambiguous_width,
+                               tabsize=args.tabsize))
         except ValueError as e:
             p.error(str(e))
         return 0
@@ -199,6 +261,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 rules=args.rules,
                 ansi_reflow=args.ansi_reflow,
                 tabsize=args.tabsize,
+                ruby=args.ruby,
+                ruby_width=args.ruby_width,
             )
         except ValueError as e:
             p.error(str(e))
