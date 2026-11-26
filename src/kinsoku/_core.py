@@ -416,6 +416,11 @@ def _char_width(ch: str, ambiguous_width: int) -> int:
         return 0
     if 0xE0100 <= cp <= 0xE01EF:  # variation selectors supplement
         return 0
+    # Hangul medial vowels and final consonants (conjoining jamo, including
+    # Jamo Extended-B) combine with the leading consonant before them into
+    # one syllable that is as wide as the leading consonant alone.
+    if 0x1160 <= cp <= 0x11FF or 0xD7B0 <= cp <= 0xD7FF:
+        return 0
     cat = unicodedata.category(ch)
     if cat in ("Mn", "Me", "Cf"):
         return 0
@@ -494,7 +499,19 @@ def _is_ext_pict(ch: str) -> bool:
 @lru_cache(maxsize=8192)
 def _cluster_kind(ch: str) -> int:
     """How ``ch`` joins the cluster before it: 0 starts a new cluster,
-    1 extends it (zero width, skin tone modifier), 2 is a regional indicator."""
+    1 extends it (zero width, skin tone modifier), 2 is a regional indicator,
+    3 is a Hangul leading consonant (L) and 4 a precomposed Hangul syllable
+    (LV / LVT); 3 and 4 join a cluster that ends in an L.
+
+    Hangul medial vowels (V) and final consonants (T) are zero width, so
+    they extend the cluster before them: an L + V (+ T) sequence (NFD
+    Hangul) is one cluster, as in the Unicode Hangul syllable rules
+    (UAX #29 GB6–GB8).
+    """
+    if "\u1100" <= ch <= "\u115f" or "\ua960" <= ch <= "\ua97f":
+        return 3
+    if "\uac00" <= ch <= "\ud7a3":
+        return 4
     if "\U0001F1E6" <= ch <= "\U0001F1FF":
         return 2
     if "\U0001F3FB" <= ch <= "\U0001F3FF":
@@ -595,7 +612,9 @@ def _clusters(text: str) -> Iterator[str]:
     A cluster is a base character plus trailing zero-width characters
     (combining marks, variation selectors, keycap, tags), skin tone
     modifiers, and anything joined by ZWJ; two regional indicators form one
-    flag.  ANSI escape sequences are kept intact and attached to a
+    flag.  Decomposed (NFD) Hangul — a leading consonant followed by a vowel
+    and an optional final consonant, written as conjoining jamo — is one
+    cluster, like the precomposed syllable.  ANSI escape sequences are kept intact and attached to a
     neighbouring cluster, so they are never split and never counted.
     """
     if "\x1b" not in text:
@@ -606,6 +625,7 @@ def _clusters(text: str) -> Iterator[str]:
     prefix = ""  # escapes seen before any base char of the next cluster
     joiner = False
     ri_open = False  # buf is a lone regional indicator
+    lead = False  # buf ends in a Hangul leading consonant
     pos = 0
     n = len(text)
     while pos < n:
@@ -621,7 +641,8 @@ def _clusters(text: str) -> Iterator[str]:
                 continue
         pos += 1
         k = kind(ch)
-        if buf and (joiner or k == 1 or (k == 2 and ri_open)):
+        if buf and (joiner or k == 1 or (k == 2 and ri_open)
+                    or (k > 2 and lead)):
             buf += ch
             ri_open = False
         else:
@@ -631,6 +652,7 @@ def _clusters(text: str) -> Iterator[str]:
             prefix = ""
             ri_open = k == 2
         joiner = ch == _ZWJ
+        lead = k == 3
     if buf or prefix:
         yield buf + prefix
 
@@ -644,9 +666,11 @@ def _clusters_plain(text: str) -> Iterator[str]:
     buf = ""
     joiner = False
     ri_open = False
+    lead = False
     for ch in text:
         k = kind(ch)
-        if buf and (joiner or k == 1 or (k == 2 and ri_open)):
+        if buf and (joiner or k == 1 or (k == 2 and ri_open)
+                    or (k > 2 and lead)):
             buf += ch
             ri_open = False
         else:
@@ -655,6 +679,7 @@ def _clusters_plain(text: str) -> Iterator[str]:
             buf = ch
             ri_open = k == 2
         joiner = ch == _ZWJ
+        lead = k == 3
     if buf:
         yield buf
 

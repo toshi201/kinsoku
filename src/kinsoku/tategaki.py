@@ -7,9 +7,19 @@ bottom, all with the same display width.
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from typing import List, Optional, Tuple
 
-from ._core import HANGABLE, NO_END, NO_START, _check_width, char_width, strip_ansi
+from ._core import (
+    HANGABLE,
+    NO_END,
+    NO_START,
+    _check_width,
+    _cluster_width,
+    _clusters_plain,
+    strip_ansi,
+)
 
 __all__ = ["tategaki", "VERTICAL_FORMS"]
 
@@ -57,49 +67,73 @@ def _to_fullwidth(ch: str) -> str:
 
 
 def _fit(s: str) -> str:
-    """Pad ``s`` to exactly two display columns."""
-    w = sum(char_width(c) for c in s)
+    """Pad ``s`` (one grapheme cluster) to exactly two display columns."""
+    w = _cluster_width(s, 1)
     return s + " " * (2 - w) if w < 2 else s
+
+
+_HW_KANA_RE = re.compile("[\uff66-\uff9d][\uff9e\uff9f]?|[\uff61-\uff65\uff9e\uff9f]")
+
+
+def _hw_kana(cl: str) -> str:
+    """Full-width form of a half-width katakana cluster (ｶﾞ -> ガ)."""
+    fw = unicodedata.normalize("NFKC", cl)
+    return unicodedata.normalize("NFC", fw)
 
 
 def _cells(line: str, halfwidth: str) -> List[_Cell]:
     cells: List[_Cell] = []
-    i, n = 0, len(line)
+    if halfwidth == "fullwidth" and _HW_KANA_RE.search(line):
+        # Half-width katakana (with its sound mark) becomes one full-width
+        # cluster; mark the result so the original chars stay available for
+        # the kinsoku checks.
+        clusters: List[Tuple[str, str]] = []
+        pos = 0
+        for m in _HW_KANA_RE.finditer(line):
+            clusters.extend((cl, cl) for cl in _clusters_plain(line[pos:m.start()]))
+            clusters.append((m.group(), _hw_kana(m.group())))
+            pos = m.end()
+        clusters.extend((cl, cl) for cl in _clusters_plain(line[pos:]))
+    else:
+        clusters = [(cl, cl) for cl in _clusters_plain(line)]
+    i, n = 0, len(clusters)
     while i < n:
-        ch = line[i]
-        if ch == "\t":
-            ch = " " if halfwidth == "fullwidth" else _FULL_SPACE
+        orig, cl = clusters[i]
+        i += 1
+        ch = cl[0]
+        if cl == "\t":
+            cl = ch = " " if halfwidth == "fullwidth" else _FULL_SPACE
         cp = ord(ch)
         if cp < 0x20 or 0x7F <= cp < 0xA0:  # other control characters
-            i += 1
+            # A zero-width char after a control char would be its cluster.
+            rest = cl[1:]
+            if not rest:
+                continue
+            orig, cl, ch = orig[1:], rest, rest[0]
+        w = _cluster_width(cl, 1)
+        if len(cl) > 1 and w == 2:
+            # Emoji sequence, flag, keycap, NFD Hangul: one cell as is.
+            cells.append((orig[0], orig[-1], _fit(cl)))
             continue
+        if w == 0:
+            # Zero-width chars with nothing before them.
+            cells.append((orig[0], orig[-1], _fit(" " + cl)))
+            continue
+        marks = cl[1:]  # combining marks on the base char
         if _is_ascii(ch):
             if halfwidth == "pair":
-                if i + 1 < n and _is_ascii(line[i + 1]):
-                    s = line[i:i + 2]
+                if (not marks and i < n and len(clusters[i][1]) == 1
+                        and _is_ascii(clusters[i][1])):
+                    s = ch + clusters[i][1]
                     cells.append((s[0], s[1], s))
-                    i += 2
+                    i += 1
                     continue
-                cells.append((ch, ch, ch + " "))
-                i += 1
+                cells.append((orig[0], orig[-1], _fit(cl)))
                 continue
             fw = _to_fullwidth(ch)
-            cells.append((ch, ch, _fit(VERTICAL_FORMS.get(fw, fw))))
-            i += 1
+            cells.append((orig[0], orig[-1], _fit(VERTICAL_FORMS.get(fw, fw) + marks)))
             continue
-        w = char_width(ch)
-        if w == 0:
-            # Zero-width / combining char: attach to the previous cell.
-            if cells:
-                first, last, disp = cells[-1]
-                core = disp.rstrip(" ")
-                cells[-1] = (first, last, _fit(core + ch))
-            else:
-                cells.append((ch, ch, _fit(" " + ch)))
-            i += 1
-            continue
-        cells.append((ch, ch, _fit(VERTICAL_FORMS.get(ch, ch))))
-        i += 1
+        cells.append((orig[0], orig[-1], _fit(VERTICAL_FORMS.get(ch, ch) + marks)))
     return cells
 
 
@@ -150,7 +184,11 @@ def tategaki(
 
     - Brackets, punctuation, ``ー`` etc. are replaced by their vertical
       presentation forms (see :data:`VERTICAL_FORMS`).
-    - ``halfwidth="fullwidth"``: printable ASCII is converted to full-width,
+    - Each grapheme cluster takes one cell: emoji sequences (ZWJ, flags,
+      skin tones, keycaps) and decomposed (NFD) Hangul syllables are never
+      split across cells.
+    - ``halfwidth="fullwidth"``: printable ASCII and half-width katakana
+      (with its sound mark, ``ｶﾞ`` -> ``ガ``) are converted to full-width,
       one char per cell.  ``halfwidth="pair"``: up to two consecutive ASCII
       chars share one cell (縦中横, e.g. ``"12"``).
     - Kinsoku (judged on the original chars): NO_START chars never start a
@@ -158,7 +196,7 @@ def tategaki(
       column (追い出し).  With ``hanging=True``, ``、。，．,.`` may instead
       hang in an extra row below the column; if any char hangs, every column
       gets ``height + 1`` rows.
-    - Zero-width / combining chars attach to the previous cell; ANSI escape
+    - Zero-width / combining chars stay with the char they combine with; ANSI escape
       sequences are removed.
     """
     _check_width(height, "height")
