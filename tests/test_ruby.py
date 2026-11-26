@@ -106,8 +106,11 @@ def test_kinsoku_after_ruby():
     # 。 after 》 must not start a line: it is pushed out together
     lines = wrap("あいう漢字《かんじ》。", 8, ruby=True, ruby_width="base")
     assert lines == ["あいう", "漢字《かんじ》。"]
-    # even when the ruby unit itself overflows
-    lines = wrap("あ漢字《かんじ》。", 14, ruby=True)
+    # the ruby unit fits alone but not with its 。: with break_long_words
+    # (the default) width wins and the ruby is dropped (#63) ...
+    assert wrap("あ漢字《かんじ》。", 14, ruby=True) == ["あ漢字。"]
+    # ... without it, kinsoku wins and the line overflows
+    lines = wrap("あ漢字《かんじ》。", 14, ruby=True, break_long_words=False)
     assert lines == ["あ", "漢字《かんじ》。"]
 
 
@@ -198,7 +201,12 @@ def test_ruby_with_ansi_reflow_and_rules():
 
     out = wrap("\x1b[31mあ漢字《かんじ》い\x1b[0m", 14, ruby=True, ansi_reflow=True)
     assert out == ["\x1b[31mあ\x1b[0m", "\x1b[31m漢字《かんじ》\x1b[0m", "\x1b[31mい\x1b[0m"]
-    assert wrap("漢字《かんじ》ッう", 14, ruby=True) == ["漢字《かんじ》ッ", "う"]
+    # 漢字《かんじ》ッ is one kinsoku block wider than 14: its ruby goes (#63)
+    assert wrap("漢字《かんじ》ッう", 14, ruby=True) == ["漢字ッう"]
+    assert wrap("漢字《かんじ》ッう", 14, ruby=True, break_long_words=False) == [
+        "漢字《かんじ》ッ",
+        "う",
+    ]
     assert wrap("漢字《かんじ》ッう", 14, ruby=True, rules="loose") == [
         "漢字《かんじ》",
         "ッう",
