@@ -113,6 +113,10 @@ def main(argv=None) -> None:
     rng = random.Random(43)
     long_word = "".join(rng.choices(LONG_WORD_CHARS, k=args.long_word))
 
+    # hard-wrapped text with no blank lines: one paragraph of ~1 MB, #66
+    hard = "\n".join(kinsoku.wrap(text, 40)) + "\n"
+    hard_mb = len(hard.encode("utf-8")) / 1e6
+
     cases = [
         ("kinsoku.wrap(width=40)", lambda: kinsoku.wrap(text, 40)),
         ("kinsoku.wrap(width=80)", lambda: kinsoku.wrap(text, 80)),
@@ -124,13 +128,24 @@ def main(argv=None) -> None:
             lambda: kinsoku.wrap(long_word, 76),
         ),
         ("textwrap.wrap(long word, 76) [ref]", lambda: textwrap.wrap(long_word, 76)),
+        ("kinsoku.unwrap(1 paragraph)", lambda: kinsoku.unwrap(hard)),
+        ("kinsoku.rewrap(1 paragraph, 60)", lambda: kinsoku.rewrap(hard, 60)),
+        (
+            "kinsoku.unwrap(indent_marks)",
+            lambda: kinsoku.unwrap(hard, indent_marks_paragraph=True),
+        ),
     ]
     print(f"{'case':<36} {'seconds':>9} {'MB/s':>8}")
     print("-" * 55)
     mb = nbytes / 1e6
     for name, fn in cases:
         t = best(fn, args.repeat)
-        size = len(long_word) / 1e6 if "long word" in name else mb
+        if "long word" in name:
+            size = len(long_word) / 1e6
+        elif "unwrap" in name or "rewrap" in name:
+            size = hard_mb
+        else:
+            size = mb
         print(f"{name:<36} {t:>9.4f} {size / t:>8.2f}")
 
 
