@@ -71,6 +71,7 @@ NOT_MODE_DEPENDENT = {
     "--help",
     "--version",
     "--encoding",
+    "--verbose",
     "--truncate",
     "--width-of",
     "--tategaki",
