@@ -224,12 +224,24 @@ RUBY_TEXT = " ｜吾輩《わがはい》は猫である。名前は\nまだ無�
 
 def test_rewrap_ruby_keeps_annotations_whole(capsys, monkeypatch):
     import kinsoku
-    out = main_out(["--rewrap", "-w", "12", "--ruby"], RUBY_TEXT, capsys, monkeypatch)
+    # Wide enough for the indented ruby unit: the notation stays whole.
+    out = main_out(["--rewrap", "-w", "19", "--ruby"], RUBY_TEXT, capsys, monkeypatch)
     assert out.splitlines()[0] == " ｜吾輩《わがはい》"
-    assert out == kinsoku.rewrap(RUBY_TEXT, 12, ruby=True)
-    # without --ruby the annotation is split mid-way
+    assert out == kinsoku.rewrap(RUBY_TEXT, 19, ruby=True)
+
+
+def test_rewrap_ruby_never_splits_notation(capsys, monkeypatch):
+    import kinsoku
+    # Too narrow for the ruby unit: without --ruby the notation is cut
+    # mid-way; with --ruby it is never cut (an over-wide unit drops its
+    # annotation and wraps the base text instead, see #51).
     plain = main_out(["--rewrap", "-w", "12"], RUBY_TEXT, capsys, monkeypatch)
     assert "《わがはい》" not in plain
+    out = main_out(["--rewrap", "-w", "12", "--ruby"], RUBY_TEXT, capsys, monkeypatch)
+    assert out == kinsoku.rewrap(RUBY_TEXT, 12, ruby=True)
+    for line in out.splitlines():
+        assert line.count("《") == line.count("》")
+        assert "｜" not in line or "《" in line
 
 
 def test_rewrap_ruby_width_is_passed(capsys, monkeypatch):
