@@ -6,6 +6,7 @@ import argparse
 import codecs
 import csv
 import io
+import os
 import shutil
 import sys
 
@@ -137,6 +138,42 @@ def _check_options(p: argparse.ArgumentParser, args: argparse.Namespace, mode: s
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Entry point. Errors raised while writing the output are reported
+    without a traceback (#67)."""
+    try:
+        code = _main(argv)
+        sys.stdout.flush()
+    except BrokenPipeError:
+        # The reader went away (``kinsoku ... | head``). Following the
+        # "Note on SIGPIPE" in the signal module docs, point stdout at
+        # devnull so the flush at interpreter exit does not fail again,
+        # and exit like a process killed by SIGPIPE (128 + 13).
+        _silence_stdout()
+        return 141
+    except KeyboardInterrupt:
+        return 130
+    except UnicodeEncodeError:
+        enc = getattr(sys.stdout, "encoding", None) or "the output encoding"
+        sys.stderr.write(
+            f"kinsoku: error: cannot encode output as {enc} (try PYTHONIOENCODING=utf-8)\n"
+        )
+        return 1
+    return code
+
+
+def _silence_stdout() -> None:
+    try:
+        fd = sys.stdout.fileno()
+    except (AttributeError, OSError, ValueError):
+        return  # not a real file (e.g. replaced in tests)
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull, fd)
+    finally:
+        os.close(devnull)
+
+
+def _main(argv: list[str] | None) -> int:
     p = argparse.ArgumentParser(
         prog="kinsoku",
         description="Wrap Japanese/CJK text by display width with kinsoku shori.",
@@ -147,7 +184,8 @@ def main(argv: list[str] | None = None) -> int:
         "--width",
         type=int,
         default=None,
-        help="max columns per line (default: $COLUMNS, terminal width, or 80)",
+        help="max columns per line (default: $COLUMNS, terminal width, or 80); "
+        "with --table, 0 means no limit",
     )
     p.add_argument(
         "--hanging", action="store_true", help="let 、。,. hang past the margin (ぶら下げ)"
@@ -215,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument(
         "--table",
         action="store_true",
-        help="format CSV/TSV input as a table (-w is the total width budget)",
+        help="format CSV/TSV input as a table (-w is the total width budget; -w 0: no limit)",
     )
     p.add_argument(
         "--gap", type=int, default=None, help="with --tategaki: spaces between columns (default: 1)"
@@ -259,7 +297,9 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     w = args.width if args.width is not None else _default_width()
-    if w < 1:
+    if args.table and args.width == 0:
+        pass  # --table -w 0: no width limit (#68)
+    elif w < 1:
         p.error("width must be > 0")
     if args.max_lines is not None and args.max_lines < 1:
         p.error("--max-lines must be >= 1")
@@ -301,30 +341,34 @@ def main(argv: list[str] | None = None) -> int:
         if args.ruby:
             text = strip_ruby(text)
         try:
-            print(tategaki(text.rstrip("\n"), args.tategaki, gap=gap))
+            out = tategaki(text.rstrip("\n"), args.tategaki, gap=gap)
         except ValueError as e:
             p.error(str(e))
+        print(out)
         return 0
     if args.table:
-        return _table(p, args, text)
+        # -w omitted: the terminal width caps the table like plain wrapping
+        return _table(p, args, text, None if args.width == 0 else w)
     if args.width_of:
         for line in text.splitlines():
             print(width(line, args.ambiguous_width, tabsize=args.tabsize))
         return 0
     if args.truncate:
         try:
-            for line in text.splitlines():
-                print(
-                    truncate(
-                        line,
-                        w,
-                        placeholder=placeholder,
-                        ambiguous_width=args.ambiguous_width,
-                        tabsize=args.tabsize,
-                    )
+            lines = [
+                truncate(
+                    line,
+                    w,
+                    placeholder=placeholder,
+                    ambiguous_width=args.ambiguous_width,
+                    tabsize=args.tabsize,
                 )
+                for line in text.splitlines()
+            ]
         except ValueError as e:
             p.error(str(e))
+        for line in lines:
+            print(line)
         return 0
     if args.unwrap:
         out = unwrap(
@@ -382,7 +426,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _table(p: argparse.ArgumentParser, args: argparse.Namespace, text: str) -> int:
+def _table(p: argparse.ArgumentParser, args: argparse.Namespace, text: str, w: int | None) -> int:
     delim = args.delimiter
     if delim in ("\\t", "tab"):
         delim = "\t"
@@ -399,7 +443,7 @@ def _table(p: argparse.ArgumentParser, args: argparse.Namespace, text: str) -> i
         out = table(
             rows,
             headers,
-            width=args.width,
+            width=w,
             style=args.style,
             ambiguous_width=args.ambiguous_width,
             hanging=args.hanging,
