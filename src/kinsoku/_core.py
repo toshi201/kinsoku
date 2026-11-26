@@ -954,6 +954,48 @@ def _split_long(
     return chunks
 
 
+def _strip_wide_ruby(text: str, limit: int, aw: int, ruby_width: str) -> str:
+    """Replace each ruby notation of ``text`` wider than ``limit`` by its base."""
+    out: List[str] = []
+    for cl, w in _pieces(text, aw, True, ruby_width):
+        if w > limit and "《" in cl:
+            cl = strip_ruby(cl)  # escapes around the notation are kept
+        out.append(cl)
+    return "".join(out)
+
+
+def _unruby_wide(
+    units: List[_Unit],
+    limit: int,
+    hanging: bool,
+    keep_all: bool,
+    aw: int,
+    rules: KinsokuRules,
+    ruby_width: str,
+) -> List[_Unit]:
+    """Make ruby notations that fit on no line breakable (#51).
+
+    A ruby notation wider than ``limit`` (the widest line) cannot be kept
+    whole without overflowing, so with ``break_long_words=True`` its ruby is
+    dropped and the base text is wrapped like ordinary text.  Ruby cannot be
+    re-attached to parts of the base: which reading belongs to which base
+    character is unknown (``｜魔法少女《マジカルガール》``).
+    """
+    out: List[_Unit] = []
+    for u in units:
+        if u.space or u.width - u.hang <= limit or "《" not in u.text:
+            out.append(u)
+            continue
+        text = _strip_wide_ruby(u.text, limit, aw, ruby_width)
+        if text == u.text:
+            out.append(u)
+            continue
+        out.extend(_glue(
+            _atoms(text, aw, keep_all, rules, True, ruby_width), hanging, aw, rules
+        ))
+    return out
+
+
 def _join_sound_marks(
     cls: List[str], ws: List[int]
 ) -> Tuple[List[str], List[int]]:
@@ -988,6 +1030,11 @@ def _wrap_line(
         ambiguous_width,
         rules,
     )
+    if ruby and break_long_words and "《" in line:
+        units = _unruby_wide(
+            units, max(first_width, rest_width), hanging, keep_all,
+            ambiguous_width, rules, ruby_width,
+        )
     lines: List[str] = []
     cur: List[_Unit] = []
     cur_w = 0
@@ -1112,11 +1159,19 @@ def wrap(
         (e.g. ``"\u3000"`` for Japanese paragraph indentation).
     :param subsequent_indent: prepended to the other lines.
     :param hanging: allow ``、。,.`` to hang past the margin (ぶら下げ).
-    :param break_long_words: hard-split units wider than ``width``.
+    :param break_long_words: hard-split units wider than ``width``.  With
+        ``ruby=True``, a ruby notation wider than every line loses its ruby
+        and its base text is wrapped like ordinary text (#51).
     :param keep_all: only break at spaces, like CSS ``word-break: keep-all``
         (natural for Korean).
     :param max_lines: keep at most this many lines; if text is cut, the last
-        line ends with ``placeholder``.
+        line ends with ``placeholder``.  To make room for it, latin words are
+        dropped whole, as in :mod:`textwrap`, and CJK text character by
+        character; if nothing of the last line is left, the placeholder ends
+        the previous line when it fits there, or stands on a line of its
+        own.  A word that fills a line by itself, or the first word of the
+        first line, is cut by characters instead, so some text always
+        remains (textwrap would drop it).
     :param ambiguous_width: width of East Asian Ambiguous characters (1 or 2).
     :param rules: kinsoku rules: a preset name (``"ja"`` (default),
         ``"strict"``, ``"loose"``, ``"zh-hans"``, ``"zh-hant"``, ``"ko"``)
@@ -1126,7 +1181,9 @@ def wrap(
         the next one, after the indent, so every line stands on its own.
     :param ruby: recognize ruby notation (``｜漢字《かんじ》`` / ``漢字《かんじ》``,
         青空文庫・なろう形式). The base text and its ruby form one unbreakable
-        unit; kinsoku still applies around it.
+        unit; kinsoku still applies around it.  A unit wider than every line
+        is reduced to its base text when ``break_long_words=True``, and
+        overflows when it is ``False``.
     :param ruby_width: how a ruby unit is measured when ``ruby=True``:
         ``"full"`` (default) counts the notation as displayed, including
         ``｜《》`` and the annotation; ``"base"`` counts only the base text
@@ -1184,8 +1241,21 @@ def wrap(
         out = [i + b for i, b in pairs]
         if cut:
             body = _cut_for_placeholder(
-                out[-1], width, placeholder, ambiguous_width, rules, ruby, ruby_width
+                out[-1], width, placeholder, ambiguous_width, rules, ruby,
+                ruby_width, pairs[-1][0], len(out) == 1,
             )
+            if body is None:
+                # nothing of the last line fits: like textwrap, end the
+                # previous line with the placeholder if it fits there
+                del out[-1]
+                if out and _w(out[-1], ambiguous_width) + _w(placeholder, ambiguous_width) <= width:
+                    out[-1] += _close_after("".join(out)) + placeholder
+                else:
+                    out.append(
+                        _lone_placeholder(pairs[-1][0], placeholder, width, ambiguous_width)
+                        .replace("\0", _close_after("".join(out)))
+                    )
+                return out
             # close whatever is open at the cut (styling may come from
             # earlier lines, since they are printed one after another)
             out[-1] = body + _close_after("".join(out[:-1]) + body) + placeholder
@@ -1198,8 +1268,17 @@ def wrap(
             start = state.copy()
             line = indent + (start.open() if body else "") + body
             kept = _cut_for_placeholder(
-                line, width, placeholder, ambiguous_width, rules, ruby, ruby_width
+                line, width, placeholder, ambiguous_width, rules, ruby,
+                ruby_width, indent, k == 0,
             )
+            if kept is None:
+                if out and _w(out[-1], ambiguous_width) + _w(placeholder, ambiguous_width) <= width:
+                    out[-1] += placeholder  # the line is already closed
+                else:
+                    out.append(_lone_placeholder(
+                        indent, placeholder, width, ambiguous_width
+                    ).replace("\0", ""))
+                break
             if len(kept) < len(indent):  # the cut ate into the indent
                 end = _AnsiState()
                 end.feed_text(kept)
@@ -1212,6 +1291,50 @@ def wrap(
     return out
 
 
+def _lone_placeholder(indent: str, placeholder: str, width_: int, aw: int) -> str:
+    """A last line holding only the placeholder (``"\\0"`` marks where to
+    close styling)."""
+    ph = placeholder.lstrip()
+    if _w(indent + ph, aw) <= width_:
+        return indent + "\0" + ph
+    return "\0" + ph
+
+
+def _is_word(text: str, aw: int) -> bool:
+    """Whether ``text`` is made only of narrow characters (a latin word)."""
+    v = strip_ansi(text) if "\x1b" in text else text
+    return all(
+        _char_width(c, aw) == 1 and not "\uff61" <= c <= "\uff9f" for c in v
+    )
+
+
+def _cut_units(
+    text: str, aw: int, rules: KinsokuRules, ruby: bool, ruby_width: str
+) -> List[_Unit]:
+    """Units the placeholder cut drops one at a time.
+
+    A latin word (a run of narrow characters, with the punctuation attached
+    to it, like a :mod:`textwrap` chunk) is one unit; a wide character, a
+    halfwidth kana and a ruby notation are units of their own; spaces are
+    separate units.
+    """
+    out: List[_Unit] = []
+    prev_word = False
+    for a in _atoms(text, aw, False, rules, ruby, ruby_width):
+        word = not a.space and _is_word(a.text, aw)
+        if word and prev_word:
+            out[-1].text += a.text
+            out[-1].width += a.width
+        else:
+            out.append(_Unit(a.text, a.width, a.space))
+        prev_word = word
+    return out
+
+
+def _visible(text: str) -> bool:
+    return bool((strip_ansi(text) if "\x1b" in text else text).strip())
+
+
 def _cut_for_placeholder(
     line: str,
     width_: int,
@@ -1220,24 +1343,66 @@ def _cut_for_placeholder(
     rules: KinsokuRules = _JA,
     ruby: bool = False,
     ruby_width: str = "full",
-) -> str:
-    """Cut ``line`` so that ``placeholder`` can follow it within ``width_``."""
+    indent: str = "",
+    alone: bool = True,
+) -> Optional[str]:
+    """Cut ``line`` so that ``placeholder`` can follow it within ``width_``.
+
+    ``line`` starts with ``indent``, which is kept.  The rest is shortened
+    unit by unit (see :func:`_cut_units`), like :mod:`textwrap` drops whole
+    words.  If that leaves nothing of the text and the first word is too
+    long (it reaches ``width_`` on its own), or this is the only line
+    (``alone``), it is cut cluster by cluster instead, with ruby notations
+    reduced to their base text, so some text always remains (#50, #51).
+    Otherwise ``None`` is returned: the caller then puts the placeholder at
+    the end of the previous line or on a line of its own, as textwrap does.
+    """
     pw = _w(placeholder, aw)
     if pw > width_:
         raise ValueError("placeholder is wider than width")
-    pieces = list(_pieces(line, aw, ruby, ruby_width))
-    if "ﾞ" in line or "ﾟ" in line:
+    body = line[len(indent):]
+    budget = width_ - pw - _w(indent, aw)
+    no_end = _first(placeholder) in rules.no_start
+    units = _cut_units(body, aw, rules, ruby, ruby_width)
+    kept = list(units)
+    total = sum(u.width for u in kept)
+    while kept and (
+        total > budget
+        or kept[-1].space
+        or no_end and _last(kept[-1].text) in rules.no_end
+    ):
+        total -= kept.pop().width
+    if any(not u.space and _visible(u.text) for u in kept):
+        return indent + "".join(u.text for u in kept)
+
+    # nothing fits word by word
+    first = next((u for u in units if not u.space and _visible(u.text)), None)
+    if first is None:
+        return None
+    reach = _w(indent, aw)
+    for u in units:
+        reach += u.width
+        if u is first:
+            break
+    if not (alone or reach >= width_ or not _is_word(first.text, aw)):
+        return None
+    if ruby and "《" in body:
+        body = strip_ruby(body)
+    pieces = list(_pieces(body, aw))
+    if "ﾞ" in body or "ﾟ" in body:
         cls, ws = _join_sound_marks([c for c, _ in pieces], [w for _, w in pieces])
         pieces = list(zip(cls, ws))
     total = sum(w for _, w in pieces)
     while pieces and (
-        total + pw > width_
+        total > budget
         or _first(pieces[-1][0]) in _SPACES
-        or _first(placeholder) in rules.no_start
-        and _first(pieces[-1][0]) in rules.no_end
+        or no_end and _first(pieces[-1][0]) in rules.no_end
     ):
         total -= pieces.pop()[1]
-    return "".join(c for c, _ in pieces)
+    kept_text = "".join(c for c, _ in pieces)
+    if not _visible(kept_text):
+        return None
+    return indent + kept_text
 
 
 def fill(text: str, width: int = 70, **kwargs) -> str:

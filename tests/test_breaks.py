@@ -63,7 +63,8 @@ def test_trailing_punctuation_still_follows_kinsoku():
 
 
 def test_infix_inside_ruby_text():
-    assert wrap("漢字《かんじ》はv1.2.3です", 12, ruby=True) == [
+    # the 14-column ruby unit overflows only with break_long_words=False (#51)
+    assert wrap("漢字《かんじ》はv1.2.3です", 12, ruby=True, break_long_words=False) == [
         "漢字《かんじ》", "はv1.2.3です",
     ]
 

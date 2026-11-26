@@ -19,7 +19,13 @@ Differences from :class:`textwrap.TextWrapper`:
   word unless ``break_long_words`` forces it).
 * ``placeholder`` keeps textwrap's default ``" [...]"`` for compatibility;
   ``"…"`` usually looks nicer for CJK text.  When ``max_lines`` cuts text,
-  the last line is shortened cluster by cluster, not word by word.
+  the last line is shortened like textwrap does: latin words are dropped
+  whole (CJK text character by character), and if nothing of the last line
+  is left, the placeholder goes at the end of the previous line or on a
+  line of its own.  The one difference: when even the first word of the
+  *first* line does not fit before the placeholder, or a word is so long
+  that it fills a line by itself, that word is cut by characters
+  (``"Hell [...]"``) instead of being dropped, so some text always remains.
 
 Kinsoku-specific keyword-only options (``hanging``, ``keep_all``,
 ``ambiguous_width``) and any other keyword arguments (``**extra``) are passed
