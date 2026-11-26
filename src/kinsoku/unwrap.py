@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Iterator
+from typing import Any
 
 from ._core import _ANSI_RE, NO_END, NO_START, char_width, strip_ansi, wrap
 
@@ -146,7 +148,9 @@ def _starts_paragraph(body: str, indent_marks_paragraph: bool) -> bool:
     return indent_marks_paragraph and v[:1] in (" ", "\t", "　")
 
 
-def _paragraphs(text: str, indent_marks_paragraph: bool, cjk_latin_space: bool = False):
+def _paragraphs(
+    text: str, indent_marks_paragraph: bool, cjk_latin_space: bool = False
+) -> Iterator[tuple[bool, str, str]]:
     """Yield ``(is_blank, joined_body, terminator)`` for each output line."""
     cur: str | None = None
     term = ""
@@ -215,7 +219,7 @@ def rewrap(
     *,
     indent_marks_paragraph: bool = False,
     cjk_latin_space: bool = False,
-    **wrap_kwargs,
+    **wrap_kwargs: Any,
 ) -> str:
     """:func:`unwrap` ``text``, then wrap every paragraph to ``width`` columns.
 
@@ -245,7 +249,7 @@ def rewrap(
         lead, rest = ("", "") if blank else _leading_space(body)
 
         # wrapped() is only called within this iteration, so the late binding is fine
-        def wrapped(extra: str = "", **kw) -> list[str]:
+        def wrapped(extra: str = "", **kw: Any) -> list[str]:
             return wrap(
                 rest + extra,  # noqa: B023
                 width,

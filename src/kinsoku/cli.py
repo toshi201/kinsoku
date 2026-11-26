@@ -36,7 +36,8 @@ def _read_input(path: str, encoding: str) -> str:
             if encoding == "utf-8-sig" and text.startswith("\ufeff"):
                 text = text[1:]
             return text
-        return buf.read().decode(encoding)
+        data: bytes = buf.read()
+        return data.decode(encoding)
     with open(path, encoding=encoding) as f:
         return f.read()
 

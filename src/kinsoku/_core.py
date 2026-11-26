@@ -12,9 +12,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from itertools import repeat
 from types import MappingProxyType
-from typing import (
-    Literal,
-)
+from typing import Any, Literal
 
 # 行頭禁則: characters that must not start a line.
 NO_START = frozenset(
@@ -45,7 +43,7 @@ _WORD_CH = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012345
 _INFIX_NEXT = _WORD_CH | {"/"}
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class KinsokuRules:
     """A set of line-breaking (kinsoku) rules.
 
@@ -74,11 +72,24 @@ class KinsokuRules:
     hangable: frozenset[str] = frozenset()
     quotes: frozenset[str] = frozenset("\"'")
 
-    def __post_init__(self) -> None:
-        for name in ("no_start", "no_end", "hangable", "quotes"):
-            value = getattr(self, name)
+    # An explicit __init__ (instead of the generated one + __post_init__) so
+    # that the signature says what is accepted: any iterable of characters.
+    def __init__(
+        self,
+        no_start: Iterable[str] = frozenset(),
+        no_end: Iterable[str] = frozenset(),
+        hangable: Iterable[str] = frozenset(),
+        quotes: Iterable[str] = frozenset("\"'"),
+    ) -> None:
+        for name, value in (
+            ("no_start", no_start),
+            ("no_end", no_end),
+            ("hangable", hangable),
+            ("quotes", quotes),
+        ):
             if isinstance(value, str) or not isinstance(value, frozenset):
-                object.__setattr__(self, name, frozenset(value))
+                value = frozenset(value)
+            object.__setattr__(self, name, value)
 
     @classmethod
     def preset(cls, name: str) -> KinsokuRules:
@@ -91,7 +102,9 @@ class KinsokuRules:
 
     def replace(self, **changes: Iterable[str]) -> KinsokuRules:
         """Return a copy with some fields replaced (like :func:`dataclasses.replace`)."""
-        return dataclasses.replace(self, **changes)
+        # mypy checks replace() against the field types (frozenset), but
+        # __init__ accepts any iterable of characters
+        return dataclasses.replace(self, **changes)  # type: ignore[arg-type]
 
 
 _SMALL_KANA = "ァィゥェォッャュョヮヵヶぁぃぅぇぉっゃゅょゎゕゖㇰㇱㇲㇳㇴㇵㇶㇷㇸㇹㇺㇻㇼㇽㇾㇿ"
@@ -252,8 +265,8 @@ class _AnsiState:
     """Tracks the SGR attributes and the OSC 8 hyperlink active in a stream."""
 
     def __init__(self) -> None:
-        self.sgr: dict = {}
-        self.link: tuple | None = None  # (params, uri, terminator)
+        self.sgr: dict[str, str] = {}
+        self.link: tuple[str, str, str] | None = None  # (params, uri, terminator)
 
     def feed(self, seq: str) -> None:
         """Update the state with one escape sequence (others are ignored)."""
@@ -374,8 +387,9 @@ def ansi_reflow(lines: list[str]) -> list[str]:
 # bad value gives the same ValueError (with the same message) everywhere.
 
 Align = Literal["left", "right", "center", "<", ">", "^"]
+_CanonicalAlign = Literal["left", "right", "center"]
 
-_ALIGNS = MappingProxyType(
+_ALIGNS: Mapping[str, _CanonicalAlign] = MappingProxyType(
     {
         "left": "left",
         "<": "left",
@@ -402,7 +416,7 @@ def _check_width(value: int, name: str = "width", *, allow_zero: bool = False) -
         raise ValueError(f"invalid {name} {value!r} (must be > 0)")
 
 
-def _check_align(align: str) -> str:
+def _check_align(align: str) -> _CanonicalAlign:
     """Return the canonical name (left, right, center) of ``align``.
 
     ``"<"``, ``">"`` and ``"^"`` (as in :func:`format`) are accepted too.
@@ -889,7 +903,7 @@ def _atoms(
             pend.clear()
 
     if ruby and "《" in text:
-        src: Iterable = _ruby_items(text, ambiguous_width, ruby_width)
+        src: Iterable[Any] = _ruby_items(text, ambiguous_width, ruby_width)
         rmode = True
     else:
         src = _clusters(text)
@@ -975,7 +989,7 @@ def _atoms(
 
 
 def _quote_kinds(
-    items: list,
+    items: list[Any],
     rmode: bool,
     qs: frozenset[str],
     no_start: frozenset[str],
@@ -1451,7 +1465,7 @@ def wrap(
         raise ValueError("ruby_width must be 'base' or 'full'")
 
     # (indent, body) pairs; the indent stays outside any re-opened styling
-    pairs: list[tuple] = []
+    pairs: list[tuple[str, str]] = []
     for line in text.splitlines() or [""]:
         if "\t" in line:
             line = _expand_tabs(line, tabsize, ambiguous_width)
@@ -1657,12 +1671,12 @@ def _cut_for_placeholder(
     return indent + kept_text
 
 
-def fill(text: str, width: int = 70, **kwargs) -> str:
+def fill(text: str, width: int = 70, **kwargs: Any) -> str:
     """Like :func:`wrap` but return a single string joined by newlines."""
     return "\n".join(wrap(text, width, **kwargs))
 
 
-def shorten(text: str, width: int, placeholder: str = "…", **kwargs) -> str:
+def shorten(text: str, width: int, placeholder: str = "…", **kwargs: Any) -> str:
     """Wrap ``text`` and keep only what fits on one line (like textwrap.shorten,
     but whitespace is not collapsed and kinsoku is respected)."""
     return wrap(text, width, max_lines=1, placeholder=placeholder, **kwargs)[0]

@@ -50,7 +50,7 @@ def _per_column(name: str, value: Any, ncols: int, default: Any) -> list[Any]:
     return items + [default] * (ncols - len(items))
 
 
-def _cell_lines(text: str, limit: int | None, aw: int, wrap_kwargs: dict) -> list[str]:
+def _cell_lines(text: str, limit: int | None, aw: int, wrap_kwargs: dict[str, Any]) -> list[str]:
     lines: list[str] = []
     for line in text.splitlines() or [""]:
         if limit is not None and _w(line, aw) > limit:
@@ -186,9 +186,10 @@ def table(
             lines += render(head_cells)
             if style == "simple":
                 lines.append("  ".join("-" * c for c in cols))
-        for r in body_cells:
-            lines += render(r)
+        for row_cells in body_cells:
+            lines += render(row_cells)
     elif style == "markdown":
+        assert head_cells is not None  # markdown always has a header row
         lines += render(head_cells)
         marks = {
             "left": lambda n: ":" + "-" * (n - 1),
@@ -198,8 +199,8 @@ def table(
         lines.append(
             "| " + " | ".join(marks[a](c) for a, c in zip(aligns, cols, strict=True)) + " |"
         )
-        for r in body_cells:
-            lines += render(r)
+        for row_cells in body_cells:
+            lines += render(row_cells)
     else:  # grid
 
         def rule(kind: str) -> str:
@@ -208,9 +209,9 @@ def table(
 
         lines.append(rule("top"))
         groups = ([head_cells] if head_cells is not None else []) + body_cells
-        for n, r in enumerate(groups):
+        for n, row_cells in enumerate(groups):
             if n:
                 lines.append(rule("mid"))
-            lines += render(r)
+            lines += render(row_cells)
         lines.append(rule("bottom"))
     return "\n".join(lines)
