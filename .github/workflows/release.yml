@@ -16,8 +16,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-      - run: pip install pytest
-      - run: pip install .
+      - run: pip install ".[test]"
       - run: pytest -q
 
   build:
@@ -29,6 +28,16 @@ jobs:
         with:
           python-version: "3.13"
       - run: python -m pip install --upgrade build twine
+      - name: Check that the tag matches __version__
+        if: github.event_name == 'release'
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/kinsoku/__init__.py)
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::tag $TAG does not match __version__ $version (expected v$version)"
+            exit 1
+          fi
       - run: python -m build
       - run: twine check --strict dist/*
       - uses: actions/upload-artifact@v4
