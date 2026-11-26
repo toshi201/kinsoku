@@ -5,22 +5,31 @@ import pytest
 import kinsoku
 from kinsoku._core import _clusters
 
-FAMILY = "\U0001F468‍\U0001F469‍\U0001F467"  # 👨‍👩‍👧
-THUMBS_SKIN = "\U0001F44D\U0001F3FD"  # 👍🏽
-RAINBOW_FLAG = "\U0001F3F3️‍\U0001F308"  # 🏳️‍🌈
+FAMILY = "\U0001f468‍\U0001f469‍\U0001f467"  # 👨‍👩‍👧
+THUMBS_SKIN = "\U0001f44d\U0001f3fd"  # 👍🏽
+RAINBOW_FLAG = "\U0001f3f3️‍\U0001f308"  # 🏳️‍🌈
 KEYCAP_1 = "1️⃣"  # 1️⃣
 KEYCAP_HASH = "#️⃣"  # #️⃣
 HEART = "❤️"  # ❤️
 WARNING = "⚠️"  # ⚠️
-JP = "\U0001F1EF\U0001F1F5"  # 🇯🇵
-US = "\U0001F1FA\U0001F1F8"
-FR = "\U0001F1EB\U0001F1F7"
-DE = "\U0001F1E9\U0001F1EA"
-ENGLAND = "\U0001F3F4\U000E0067\U000E0062\U000E0065\U000E006E\U000E0067\U000E007F"
+JP = "\U0001f1ef\U0001f1f5"  # 🇯🇵
+US = "\U0001f1fa\U0001f1f8"
+FR = "\U0001f1eb\U0001f1f7"
+DE = "\U0001f1e9\U0001f1ea"
+ENGLAND = "\U0001f3f4\U000e0067\U000e0062\U000e0065\U000e006e\U000e0067\U000e007f"
 
 EMOJI_CLUSTERS = [
-    FAMILY, THUMBS_SKIN, RAINBOW_FLAG, KEYCAP_1, KEYCAP_HASH,
-    HEART, WARNING, JP, ENGLAND, "\U0001F44D", "\U0001F600",
+    FAMILY,
+    THUMBS_SKIN,
+    RAINBOW_FLAG,
+    KEYCAP_1,
+    KEYCAP_HASH,
+    HEART,
+    WARNING,
+    JP,
+    ENGLAND,
+    "\U0001f44d",
+    "\U0001f600",
 ]
 
 
@@ -44,8 +53,8 @@ def test_emoji_cluster_with_ansi(s):
         ("⌚︎", 2),  # ⌚︎ is East Asian Wide on its own
         ("❤", 1),  # ❤ without VS16
         ("❤︎", 1),
-        ("\U0001F1EF", 1),  # a lone regional indicator
-        ("a‍\U0001F44D", 3),  # not an emoji ZWJ sequence
+        ("\U0001f1ef", 1),  # a lone regional indicator
+        ("a‍\U0001f44d", 3),  # not an emoji ZWJ sequence
         ("1⃣", 2),  # keycap without VS16
         ("é", 1),
         ("か゚", 2),
@@ -60,7 +69,7 @@ def test_mixed_text_width():
 
 
 def test_flags_pair_up_in_order():
-    assert list(_clusters(JP + US + FR + "\U0001F1E9")) == [JP, US, FR, "\U0001F1E9"]
+    assert list(_clusters(JP + US + FR + "\U0001f1e9")) == [JP, US, FR, "\U0001f1e9"]
 
 
 def test_wrap_never_splits_flags():

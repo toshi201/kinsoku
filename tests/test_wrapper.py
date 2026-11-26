@@ -23,17 +23,28 @@ def test_is_textwrapper():
 
 def test_defaults_match_textwrap():
     k, t = KinsokuWrapper(), textwrap.TextWrapper()
-    for name in ("width", "initial_indent", "subsequent_indent", "expand_tabs",
-                 "replace_whitespace", "fix_sentence_endings", "break_long_words",
-                 "drop_whitespace", "break_on_hyphens", "tabsize", "max_lines",
-                 "placeholder"):
+    for name in (
+        "width",
+        "initial_indent",
+        "subsequent_indent",
+        "expand_tabs",
+        "replace_whitespace",
+        "fix_sentence_endings",
+        "break_long_words",
+        "drop_whitespace",
+        "break_on_hyphens",
+        "tabsize",
+        "max_lines",
+        "placeholder",
+    ):
         assert getattr(k, name) == getattr(t, name), name
     assert k.hanging is False and k.keep_all is False and k.ambiguous_width == 1
 
 
 def test_accepts_all_textwrap_args_positionally():
-    w = KinsokuWrapper(20, "> ", "  ", True, True, True, True, False, False, 4,
-                       max_lines=3, placeholder="…")
+    w = KinsokuWrapper(
+        20, "> ", "  ", True, True, True, True, False, False, 4, max_lines=3, placeholder="…"
+    )
     assert (w.width, w.tabsize, w.max_lines) == (20, 4, 3)
 
 
@@ -95,14 +106,17 @@ def test_expand_tabs_false():
     assert KinsokuWrapper(40, expand_tabs=False).wrap("a\tb") == ["a b"]
 
 
-@pytest.mark.parametrize("text", [
-    "The quick brown fox jumps over the lazy dog.",
-    "Hello world, this is a simple test of the wrapper.",
-    "a\tb\tc d e f g h i j k l m n",
-    "line one\nline two\nline three is longer",
-    "  leading spaces are kept",
-    "supercalifragilisticexpialidocious is long",
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The quick brown fox jumps over the lazy dog.",
+        "Hello world, this is a simple test of the wrapper.",
+        "a\tb\tc d e f g h i j k l m n",
+        "line one\nline two\nline three is longer",
+        "  leading spaces are kept",
+        "supercalifragilisticexpialidocious is long",
+    ],
+)
 @pytest.mark.parametrize("w", [10, 15, 20, 40])
 def test_ascii_matches_textwrap(text, w):
     assert KinsokuWrapper(width=w).wrap(text) == textwrap.TextWrapper(width=w).wrap(text)
@@ -153,8 +167,7 @@ def test_unknown_extra_kwarg_raises_on_wrap():
 
 
 def test_ignored_options_accepted():
-    w = KinsokuWrapper(10, fix_sentence_endings=True, break_on_hyphens=False,
-                       drop_whitespace=False)
+    w = KinsokuWrapper(10, fix_sentence_endings=True, break_on_hyphens=False, drop_whitespace=False)
     assert w.wrap("あいうえおかきくけこ") == kinsoku.wrap("あいうえおかきくけこ", 10)
 
 

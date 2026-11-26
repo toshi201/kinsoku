@@ -23,6 +23,7 @@ def _timed(fn):
 
 # --- #43: long words without spaces ------------------------------------------
 
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -42,9 +43,9 @@ def test_long_word_is_fast(text):
 
 def test_long_word_with_indents_and_hanging_is_fast():
     text = "a" * 200_000 + "。"
-    lines, t = _timed(lambda: wrap(
-        text, 80, initial_indent="  ", subsequent_indent="    ", hanging=True
-    ))
+    lines, t = _timed(
+        lambda: wrap(text, 80, initial_indent="  ", subsequent_indent="    ", hanging=True)
+    )
     assert t < LIMIT
     assert lines[0] == "  " + "a" * 78
     assert all(l.startswith("    ") for l in lines[1:])
@@ -87,6 +88,7 @@ def test_long_word_cli_is_fast(capsys):
 
 
 # --- #52: ASCII quotes in CJK text --------------------------------------------
+
 
 def test_issue_example_ja():
     assert wrap('彼は"テスト"と言った', 6) == ["彼は", '"テス', 'ト"と', "言った"]
@@ -192,22 +194,22 @@ def test_quotes_field():
 
 
 def test_keep_all_unaffected():
-    assert wrap('저는 "김철수"입니다', 14, rules="ko", keep_all=True) == [
-        "저는", '"김철수"입니다'
-    ]
+    assert wrap('저는 "김철수"입니다', 14, rules="ko", keep_all=True) == ["저는", '"김철수"입니다']
 
 
 def test_quotes_with_ansi_and_ruby():
     lines = wrap('彼は\x1b[31m"テスト"\x1b[0mと言った', 6)
     assert [l.replace("\x1b[31m", "").replace("\x1b[0m", "") for l in lines] == [
-        "彼は", '"テス', 'ト"と', "言った",
+        "彼は",
+        '"テス',
+        'ト"と',
+        "言った",
     ]
-    assert wrap('彼は"｜漢字《かんじ》"と', 20, ruby=True) == [
-        "彼は", '"｜漢字《かんじ》"と'
-    ]
+    assert wrap('彼は"｜漢字《かんじ》"と', 20, ruby=True) == ["彼は", '"｜漢字《かんじ》"と']
 
 
 # --- #52 follow-up: the open-quote count only applies next to non-ASCII ------
+
 
 def test_unclosed_quote_earlier_does_not_flip_ascii_quotes():
     # A paragraph that opens a quote and never closes it (the usual way to
@@ -247,9 +249,26 @@ def test_unclosed_quotes_in_english_random(rules):
     # Quotes only at word edges next to letters or between ASCII
     # characters, many of them unbalanced: the result matches quotes="".
     words = [
-        "he", "typed", "twice", 'key:"value"', 'x="abc"', 'say:"hi"',
-        '"start', 'end"', "don't", "'tis", "rock'n'roll", "v1.2", 'a"b',
-        'foo"', '"bar', "it's", 'x"y', "q:'z'", "'open", "close'",
+        "he",
+        "typed",
+        "twice",
+        'key:"value"',
+        'x="abc"',
+        'say:"hi"',
+        '"start',
+        'end"',
+        "don't",
+        "'tis",
+        "rock'n'roll",
+        "v1.2",
+        'a"b',
+        'foo"',
+        '"bar',
+        "it's",
+        'x"y',
+        "q:'z'",
+        "'open",
+        "close'",
     ]
     r_noq = KinsokuRules.preset(rules).replace(quotes="")
     rnd = random.Random(5252)
@@ -257,7 +276,8 @@ def test_unclosed_quotes_in_english_random(rules):
         text = " ".join(rnd.choice(words) for _ in range(rnd.randint(3, 25)))
         w = rnd.randint(max(map(len, text.split())), 40)
         assert wrap(text, w, rules=rules) == wrap(text, w, rules=r_noq), (
-            text, w,
+            text,
+            w,
         )
 
 

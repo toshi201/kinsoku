@@ -2,10 +2,10 @@
 
 from ._core import (
     HANGABLE,
-    KinsokuRules,
     NO_END,
     NO_START,
     PRESETS,
+    KinsokuRules,
     ansi_reflow,
     char_width,
     fill,
@@ -18,10 +18,10 @@ from ._core import (
     width,
     wrap,
 )
-from .tategaki import tategaki
-from .wrapper import KinsokuWrapper, dedent, indent
-from .unwrap import rewrap, unwrap
 from .table import table
+from .tategaki import tategaki
+from .unwrap import rewrap, unwrap
+from .wrapper import KinsokuWrapper, dedent, indent
 
 __all__ = [
     "HANGABLE",

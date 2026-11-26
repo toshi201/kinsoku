@@ -2,27 +2,17 @@
 
 from __future__ import annotations
 
+import dataclasses
 import html
 import re
 import unicodedata
-import dataclasses
-from dataclasses import dataclass
 from bisect import bisect_right
+from collections.abc import Iterable, Iterator, Mapping
+from dataclasses import dataclass
 from functools import lru_cache
 from itertools import repeat
 from types import MappingProxyType
-from typing import (
-    Dict,
-    FrozenSet,
-    Iterable,
-    Iterator,
-    List,
-    Literal,
-    Mapping,
-    Optional,
-    Tuple,
-    Union,
-)
+from typing import Any, Literal
 
 # 行頭禁則: characters that must not start a line.
 NO_START = frozenset(
@@ -48,14 +38,12 @@ _HW_SOUND = frozenset("ﾞﾟ")
 # (decimals, version numbers, digit grouping, URLs, file names).
 _INFIX = frozenset(".,:;!?%")
 # ASCII word characters that may surround infix punctuation
-_WORD_CH = frozenset(
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"
-)
+_WORD_CH = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_")
 # characters that may follow infix punctuation (``/`` for ``https://``)
 _INFIX_NEXT = _WORD_CH | {"/"}
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class KinsokuRules:
     """A set of line-breaking (kinsoku) rules.
 
@@ -79,76 +67,84 @@ class KinsokuRules:
         rules = rules.replace(no_start=rules.no_start - {"ー"})
     """
 
-    no_start: FrozenSet[str] = frozenset()
-    no_end: FrozenSet[str] = frozenset()
-    hangable: FrozenSet[str] = frozenset()
-    quotes: FrozenSet[str] = frozenset("\"'")
+    no_start: frozenset[str] = frozenset()
+    no_end: frozenset[str] = frozenset()
+    hangable: frozenset[str] = frozenset()
+    quotes: frozenset[str] = frozenset("\"'")
 
-    def __post_init__(self) -> None:
-        for name in ("no_start", "no_end", "hangable", "quotes"):
-            value = getattr(self, name)
+    # An explicit __init__ (instead of the generated one + __post_init__) so
+    # that the signature says what is accepted: any iterable of characters.
+    def __init__(
+        self,
+        no_start: Iterable[str] = frozenset(),
+        no_end: Iterable[str] = frozenset(),
+        hangable: Iterable[str] = frozenset(),
+        quotes: Iterable[str] = frozenset("\"'"),
+    ) -> None:
+        for name, value in (
+            ("no_start", no_start),
+            ("no_end", no_end),
+            ("hangable", hangable),
+            ("quotes", quotes),
+        ):
             if isinstance(value, str) or not isinstance(value, frozenset):
-                object.__setattr__(self, name, frozenset(value))
+                value = frozenset(value)
+            object.__setattr__(self, name, value)
 
     @classmethod
-    def preset(cls, name: str) -> "KinsokuRules":
+    def preset(cls, name: str) -> KinsokuRules:
         """Return the built-in preset called ``name`` (see :data:`PRESETS`)."""
         try:
             return PRESETS[name]
         except (KeyError, TypeError):
             valid = ", ".join(PRESETS)
-            raise ValueError(
-                f"unknown rules preset {name!r} (valid: {valid})"
-            ) from None
+            raise ValueError(f"unknown rules preset {name!r} (valid: {valid})") from None
 
-    def replace(self, **changes: Iterable[str]) -> "KinsokuRules":
+    def replace(self, **changes: Iterable[str]) -> KinsokuRules:
         """Return a copy with some fields replaced (like :func:`dataclasses.replace`)."""
-        return dataclasses.replace(self, **changes)
+        # mypy checks replace() against the field types (frozenset), but
+        # __init__ accepts any iterable of characters
+        return dataclasses.replace(self, **changes)  # type: ignore[arg-type]
 
 
-_SMALL_KANA = (
-    "ァィゥェォッャュョヮヵヶぁぃぅぇぉっゃゅょゎゕゖ"
-    "ㇰㇱㇲㇳㇴㇵㇶㇷㇸㇹㇺㇻㇼㇽㇾㇿ"
-)
+_SMALL_KANA = "ァィゥェォッャュョヮヵヶぁぃぅぇぉっゃゅょゎゕゖㇰㇱㇲㇳㇴㇵㇶㇷㇸㇹㇺㇻㇼㇽㇾㇿ"
 # Characters that CSS ``line-break: loose`` lets start a line: small kana,
 # the prolonged sound mark, iteration marks and hyphen-like characters.
 _LOOSE_ALLOWED = frozenset(_SMALL_KANA + "ー々〻ゝゞヽヾ‐゠–〜～" + _HW_SMALL + "ｰ")
 
-_ZH_NO_START = (
-    "，。、．！？；：…‥·・"
-    "”’」』）》〉】〗〕］｝〙〛｠"
-    ",.!?;:)]}%％"
-)
+_ZH_NO_START = "，。、．！？；：…‥·・”’」』）》〉】〗〕］｝〙〛｠,.!?;:)]}%％"
 _ZH_NO_END = "“‘「『（《〈【〖〔［｛〘〚｟([{"
 _ZH_HANGABLE = "，。、．,."
 
-PRESETS: Mapping[str, KinsokuRules] = MappingProxyType({
-    # Japanese (default): exactly NO_START / NO_END / HANGABLE.
-    "ja": KinsokuRules(NO_START, NO_END, HANGABLE),
-    # JIS X 4051-like: small kana, ー and iteration marks never start a line
-    # (the "ja" rules already follow this).
-    "strict": KinsokuRules(NO_START, NO_END, HANGABLE),
-    # CSS ``line-break: loose``-like: small kana, ー, 々 etc. may start a line.
-    "loose": KinsokuRules(NO_START - _LOOSE_ALLOWED, NO_END, HANGABLE),
-    # Simplified Chinese.
-    "zh-hans": KinsokuRules(_ZH_NO_START, _ZH_NO_END, _ZH_HANGABLE),
-    # Traditional Chinese: plus the small form variants (﹐﹑﹒ ...).
-    "zh-hant": KinsokuRules(
-        _ZH_NO_START + "﹐﹑﹒﹔﹕﹖﹗﹚﹜﹞",
-        _ZH_NO_END + "﹙﹛﹝",
-        _ZH_HANGABLE + "﹐﹑﹒",
-    ),
-    # Korean: closing punctuation/brackets (Western and CJK); no kana rules.
-    "ko": KinsokuRules(
-        ".,!?;:)]}…%’”」』）》〉】〕］｝〙〗。、，．！？；：％",
-        "([{‘“「『（《〈【〔［｛〘〖",
-        ".,，．。、",
-    ),
-})
+PRESETS: Mapping[str, KinsokuRules] = MappingProxyType(
+    {
+        # Japanese (default): exactly NO_START / NO_END / HANGABLE.
+        "ja": KinsokuRules(NO_START, NO_END, HANGABLE),
+        # JIS X 4051-like: small kana, ー and iteration marks never start a line
+        # (the "ja" rules already follow this).
+        "strict": KinsokuRules(NO_START, NO_END, HANGABLE),
+        # CSS ``line-break: loose``-like: small kana, ー, 々 etc. may start a line.
+        "loose": KinsokuRules(NO_START - _LOOSE_ALLOWED, NO_END, HANGABLE),
+        # Simplified Chinese.
+        "zh-hans": KinsokuRules(_ZH_NO_START, _ZH_NO_END, _ZH_HANGABLE),
+        # Traditional Chinese: plus the small form variants (﹐﹑﹒ ...).
+        "zh-hant": KinsokuRules(
+            _ZH_NO_START + "﹐﹑﹒﹔﹕﹖﹗﹚﹜﹞",
+            _ZH_NO_END + "﹙﹛﹝",
+            _ZH_HANGABLE + "﹐﹑﹒",
+        ),
+        # Korean: closing punctuation/brackets (Western and CJK); no kana rules.
+        "ko": KinsokuRules(
+            ".,!?;:)]}…%’”」』）》〉】〕］｝〙〗。、，．！？；：％",
+            "([{‘“「『（《〈【〔［｛〘〖",
+            ".,，．。、",
+        ),
+    }
+)
 
 _JA = PRESETS["ja"]
 
-RulesLike = Union[str, KinsokuRules]
+RulesLike = str | KinsokuRules
 
 
 def _resolve_rules(rules: RulesLike) -> KinsokuRules:
@@ -156,9 +152,8 @@ def _resolve_rules(rules: RulesLike) -> KinsokuRules:
         return rules
     if isinstance(rules, str):
         return KinsokuRules.preset(rules)
-    raise TypeError(
-        f"rules must be a preset name or KinsokuRules, not {type(rules).__name__}"
-    )
+    raise TypeError(f"rules must be a preset name or KinsokuRules, not {type(rules).__name__}")
+
 
 _SPACES = frozenset(" \t　")
 
@@ -183,7 +178,7 @@ _LEADING_ANSI_RE = re.compile("(?:" + _ANSI_RE.pattern + ")+")
 _TRAILING_ANSI_RE = re.compile("(?:" + _ANSI_RE.pattern + r")+\Z")
 
 
-def _ruby_parts(m: "re.Match[str]") -> Tuple[str, str]:
+def _ruby_parts(m: re.Match[str]) -> tuple[str, str]:
     """(base, ruby) of a ruby-notation match."""
     if m.group("ebase") is not None:
         return m.group("ebase"), m.group("eruby")
@@ -204,11 +199,11 @@ def ruby_to_html(text: str) -> str:
     ``ruby_to_html("漢字《かんじ》")`` → ``"<ruby>漢字<rt>かんじ</rt></ruby>"``.
     All text (inside and outside ruby) is HTML-escaped.
     """
-    out: List[str] = []
+    out: list[str] = []
     pos = 0
     for m in _RUBY_RE.finditer(text):
         base, rt = _ruby_parts(m)
-        out.append(html.escape(text[pos:m.start()]))
+        out.append(html.escape(text[pos : m.start()]))
         out.append(f"<ruby>{html.escape(base)}<rt>{html.escape(rt)}</rt></ruby>")
         pos = m.end()
     out.append(html.escape(text[pos:]))
@@ -226,14 +221,43 @@ _SGR_RE = re.compile(r"\x1b\[([0-9:;]*)m")
 _OSC8_RE = re.compile(r"\x1b\]8;([^;\x07\x1b]*);([^\x07\x1b]*)(\x07|\x1b\\)")
 
 # simple on/off attributes: slot -> (codes that set it, codes that clear it)
-_ATTR_ON = {1: "bold", 2: "dim", 3: "italic", 4: "underline", 21: "underline",
-            5: "blink", 6: "blink", 7: "inverse", 8: "hidden", 9: "strike",
-            53: "overline"}
-_ATTR_OFF = {22: ("bold", "dim"), 23: ("italic",), 24: ("underline",),
-             25: ("blink",), 27: ("inverse",), 28: ("hidden",),
-             29: ("strike",), 55: ("overline",)}
-_SLOTS = ("bold", "dim", "italic", "underline", "blink", "inverse", "hidden",
-          "strike", "overline", "fg", "bg", "ulcolor")
+_ATTR_ON = {
+    1: "bold",
+    2: "dim",
+    3: "italic",
+    4: "underline",
+    21: "underline",
+    5: "blink",
+    6: "blink",
+    7: "inverse",
+    8: "hidden",
+    9: "strike",
+    53: "overline",
+}
+_ATTR_OFF = {
+    22: ("bold", "dim"),
+    23: ("italic",),
+    24: ("underline",),
+    25: ("blink",),
+    27: ("inverse",),
+    28: ("hidden",),
+    29: ("strike",),
+    55: ("overline",),
+}
+_SLOTS = (
+    "bold",
+    "dim",
+    "italic",
+    "underline",
+    "blink",
+    "inverse",
+    "hidden",
+    "strike",
+    "overline",
+    "fg",
+    "bg",
+    "ulcolor",
+)
 _COLOR_SLOT = {38: "fg", 48: "bg", 58: "ulcolor"}
 
 
@@ -241,8 +265,8 @@ class _AnsiState:
     """Tracks the SGR attributes and the OSC 8 hyperlink active in a stream."""
 
     def __init__(self) -> None:
-        self.sgr: dict = {}
-        self.link: Optional[tuple] = None  # (params, uri, terminator)
+        self.sgr: dict[str, str] = {}
+        self.link: tuple[str, str, str] | None = None  # (params, uri, terminator)
 
     def feed(self, seq: str) -> None:
         """Update the state with one escape sequence (others are ignored)."""
@@ -297,7 +321,7 @@ class _AnsiState:
                 n = 2 if mode == "5" else 4 if mode == "2" else 0
                 if n == 0 or i + n > len(ps):
                     return  # malformed: ignore the rest of the sequence
-                st[_COLOR_SLOT[c]] = ";".join([str(c)] + ps[i:i + n])
+                st[_COLOR_SLOT[c]] = ";".join([str(c)] + ps[i : i + n])
                 i += n
 
     def active(self) -> bool:
@@ -322,7 +346,7 @@ class _AnsiState:
             out += "\x1b[0m"
         return out
 
-    def copy(self) -> "_AnsiState":
+    def copy(self) -> _AnsiState:
         c = _AnsiState()
         c.sgr = dict(self.sgr)
         c.link = self.link
@@ -347,7 +371,7 @@ def _reflow_body(body: str, state: _AnsiState) -> str:
     return prefix + body + state.close()
 
 
-def ansi_reflow(lines: List[str]) -> List[str]:
+def ansi_reflow(lines: list[str]) -> list[str]:
     """Make each line self-contained with respect to ANSI styling.
 
     Lines that end with active SGR attributes (colors, bold, ...) or an open
@@ -363,12 +387,18 @@ def ansi_reflow(lines: List[str]) -> List[str]:
 # bad value gives the same ValueError (with the same message) everywhere.
 
 Align = Literal["left", "right", "center", "<", ">", "^"]
+_CanonicalAlign = Literal["left", "right", "center"]
 
-_ALIGNS = MappingProxyType({
-    "left": "left", "<": "left",
-    "right": "right", ">": "right",
-    "center": "center", "^": "center",
-})
+_ALIGNS: Mapping[str, _CanonicalAlign] = MappingProxyType(
+    {
+        "left": "left",
+        "<": "left",
+        "right": "right",
+        ">": "right",
+        "center": "center",
+        "^": "center",
+    }
+)
 
 
 def _check_ambiguous_width(ambiguous_width: int) -> None:
@@ -386,7 +416,7 @@ def _check_width(value: int, name: str = "width", *, allow_zero: bool = False) -
         raise ValueError(f"invalid {name} {value!r} (must be > 0)")
 
 
-def _check_align(align: str) -> str:
+def _check_align(align: str) -> _CanonicalAlign:
     """Return the canonical name (left, right, center) of ``align``.
 
     ``"<"``, ``">"`` and ``"^"`` (as in :func:`format`) are accepted too.
@@ -394,10 +424,7 @@ def _check_align(align: str) -> str:
     try:
         return _ALIGNS[align]
     except (KeyError, TypeError):
-        raise ValueError(
-            f"unknown align {align!r} (choose from left, right, center)"
-        ) from None
-
+        raise ValueError(f"unknown align {align!r} (choose from left, right, center)") from None
 
 
 def char_width(ch: str, ambiguous_width: int = 1) -> int:
@@ -455,28 +482,83 @@ def _char_width(ch: str, ambiguous_width: int) -> int:
 # plus the reserved U+1FC00–1FFFD.  Regional indicators (U+1F1E6–1F1FF) and
 # skin tone modifiers (U+1F3FB–1F3FF) are excluded, as in the Unicode data.
 _EXT_PICT = (
-    (0x00A9, 0x00A9), (0x00AE, 0x00AE), (0x203C, 0x203C), (0x2049, 0x2049),
-    (0x2122, 0x2122), (0x2139, 0x2139), (0x2194, 0x2199), (0x21A9, 0x21AA),
-    (0x231A, 0x231B), (0x2328, 0x2328), (0x2388, 0x2388), (0x23CF, 0x23CF),
-    (0x23E9, 0x23F3), (0x23F8, 0x23FA), (0x24C2, 0x24C2), (0x25AA, 0x25AB),
-    (0x25B6, 0x25B6), (0x25C0, 0x25C0), (0x25FB, 0x25FE), (0x2600, 0x2605),
-    (0x2607, 0x2612), (0x2614, 0x2685), (0x2690, 0x2705), (0x2708, 0x2712),
-    (0x2714, 0x2714), (0x2716, 0x2716), (0x271D, 0x271D), (0x2721, 0x2721),
-    (0x2728, 0x2728), (0x2733, 0x2734), (0x2744, 0x2744), (0x2747, 0x2747),
-    (0x274C, 0x274C), (0x274E, 0x274E), (0x2753, 0x2755), (0x2757, 0x2757),
-    (0x2763, 0x2767), (0x2795, 0x2797), (0x27A1, 0x27A1), (0x27B0, 0x27B0),
-    (0x27BF, 0x27BF), (0x2934, 0x2935), (0x2B05, 0x2B07), (0x2B1B, 0x2B1C),
-    (0x2B50, 0x2B50), (0x2B55, 0x2B55), (0x3030, 0x3030), (0x303D, 0x303D),
-    (0x3297, 0x3297), (0x3299, 0x3299),
-    (0x1F000, 0x1F0FF), (0x1F10D, 0x1F10F), (0x1F12F, 0x1F12F),
-    (0x1F16C, 0x1F171), (0x1F17E, 0x1F17F), (0x1F18E, 0x1F18E),
-    (0x1F191, 0x1F19A), (0x1F1AD, 0x1F1E5), (0x1F201, 0x1F20F),
-    (0x1F21A, 0x1F21A), (0x1F22F, 0x1F22F), (0x1F232, 0x1F23A),
-    (0x1F23C, 0x1F23F), (0x1F249, 0x1F3FA), (0x1F400, 0x1F53D),
-    (0x1F546, 0x1F64F), (0x1F680, 0x1F6FF), (0x1F774, 0x1F77F),
-    (0x1F7D5, 0x1F7FF), (0x1F80C, 0x1F80F), (0x1F848, 0x1F84F),
-    (0x1F85A, 0x1F85F), (0x1F888, 0x1F88F), (0x1F8AE, 0x1F8FF),
-    (0x1F90C, 0x1F93A), (0x1F93C, 0x1F945), (0x1F947, 0x1FAFF),
+    (0x00A9, 0x00A9),
+    (0x00AE, 0x00AE),
+    (0x203C, 0x203C),
+    (0x2049, 0x2049),
+    (0x2122, 0x2122),
+    (0x2139, 0x2139),
+    (0x2194, 0x2199),
+    (0x21A9, 0x21AA),
+    (0x231A, 0x231B),
+    (0x2328, 0x2328),
+    (0x2388, 0x2388),
+    (0x23CF, 0x23CF),
+    (0x23E9, 0x23F3),
+    (0x23F8, 0x23FA),
+    (0x24C2, 0x24C2),
+    (0x25AA, 0x25AB),
+    (0x25B6, 0x25B6),
+    (0x25C0, 0x25C0),
+    (0x25FB, 0x25FE),
+    (0x2600, 0x2605),
+    (0x2607, 0x2612),
+    (0x2614, 0x2685),
+    (0x2690, 0x2705),
+    (0x2708, 0x2712),
+    (0x2714, 0x2714),
+    (0x2716, 0x2716),
+    (0x271D, 0x271D),
+    (0x2721, 0x2721),
+    (0x2728, 0x2728),
+    (0x2733, 0x2734),
+    (0x2744, 0x2744),
+    (0x2747, 0x2747),
+    (0x274C, 0x274C),
+    (0x274E, 0x274E),
+    (0x2753, 0x2755),
+    (0x2757, 0x2757),
+    (0x2763, 0x2767),
+    (0x2795, 0x2797),
+    (0x27A1, 0x27A1),
+    (0x27B0, 0x27B0),
+    (0x27BF, 0x27BF),
+    (0x2934, 0x2935),
+    (0x2B05, 0x2B07),
+    (0x2B1B, 0x2B1C),
+    (0x2B50, 0x2B50),
+    (0x2B55, 0x2B55),
+    (0x3030, 0x3030),
+    (0x303D, 0x303D),
+    (0x3297, 0x3297),
+    (0x3299, 0x3299),
+    (0x1F000, 0x1F0FF),
+    (0x1F10D, 0x1F10F),
+    (0x1F12F, 0x1F12F),
+    (0x1F16C, 0x1F171),
+    (0x1F17E, 0x1F17F),
+    (0x1F18E, 0x1F18E),
+    (0x1F191, 0x1F19A),
+    (0x1F1AD, 0x1F1E5),
+    (0x1F201, 0x1F20F),
+    (0x1F21A, 0x1F21A),
+    (0x1F22F, 0x1F22F),
+    (0x1F232, 0x1F23A),
+    (0x1F23C, 0x1F23F),
+    (0x1F249, 0x1F3FA),
+    (0x1F400, 0x1F53D),
+    (0x1F546, 0x1F64F),
+    (0x1F680, 0x1F6FF),
+    (0x1F774, 0x1F77F),
+    (0x1F7D5, 0x1F7FF),
+    (0x1F80C, 0x1F80F),
+    (0x1F848, 0x1F84F),
+    (0x1F85A, 0x1F85F),
+    (0x1F888, 0x1F88F),
+    (0x1F8AE, 0x1F8FF),
+    (0x1F90C, 0x1F93A),
+    (0x1F93C, 0x1F945),
+    (0x1F947, 0x1FAFF),
     (0x1FC00, 0x1FFFD),
 )
 _EXT_PICT_STARTS = tuple(a for a, _ in _EXT_PICT)
@@ -489,10 +571,7 @@ _KEYCAP_BASES = frozenset("#*0123456789")
 
 # Any character that can make a cluster's width differ from the sum of its
 # code point widths.  Text without these is measured per code point.
-_EMOJI_SEQ_RE = re.compile(
-    "[‍︎️⃣\U0001F1E6-\U0001F1FF"
-    "\U0001F3FB-\U0001F3FF\U000E0020-\U000E007F]"
-)
+_EMOJI_SEQ_RE = re.compile("[‍︎️⃣\U0001f1e6-\U0001f1ff\U0001f3fb-\U0001f3ff\U000e0020-\U000e007f]")
 
 
 def _is_ext_pict(ch: str) -> bool:
@@ -520,9 +599,9 @@ def _cluster_kind(ch: str) -> int:
         return 3
     if "\uac00" <= ch <= "\ud7a3":
         return 4
-    if "\U0001F1E6" <= ch <= "\U0001F1FF":
+    if "\U0001f1e6" <= ch <= "\U0001f1ff":
         return 2
-    if "\U0001F3FB" <= ch <= "\U0001F3FF":
+    if "\U0001f3fb" <= ch <= "\U0001f3ff":
         return 1
     return 1 if _char_width(ch, 1) == 0 and ch != "\t" else 0
 
@@ -543,8 +622,8 @@ def _cluster_width(cl: str, ambiguous_width: int) -> int:
     if len(cl) == 1 or not _EMOJI_SEQ_RE.search(cl):
         return plain
     base = cl[0]
-    if "\U0001F1E6" <= base <= "\U0001F1FF":
-        if len(cl) >= 2 and "\U0001F1E6" <= cl[1] <= "\U0001F1FF":
+    if "\U0001f1e6" <= base <= "\U0001f1ff":
+        if len(cl) >= 2 and "\U0001f1e6" <= cl[1] <= "\U0001f1ff":
             return 2  # flag
         return plain
     if _VS15 in cl and _VS16 not in cl and _ZWJ not in cl:
@@ -581,9 +660,7 @@ def width(text: str, ambiguous_width: int = 1, *, tabsize: int = 8) -> int:
         return len(text)
     if _EMOJI_SEQ_RE.search(text) is None:
         return sum(map(_char_width, text, repeat(ambiguous_width)))
-    return sum(
-        _cluster_width(cl, ambiguous_width) for cl in _clusters_plain(text)
-    )
+    return sum(_cluster_width(cl, ambiguous_width) for cl in _clusters_plain(text))
 
 
 _TAB_SPLIT_RE = re.compile(r"(\t|\r\n|\n|\r)")
@@ -598,7 +675,7 @@ def _expand_tabs(text: str, tabsize: int, ambiguous_width: int) -> str:
     """
     if "\t" not in text:
         return text
-    out: List[str] = []
+    out: list[str] = []
     col = 0
     for part in _TAB_SPLIT_RE.split(text):
         if part == "\t":
@@ -649,8 +726,7 @@ def _clusters(text: str) -> Iterator[str]:
                 continue
         pos += 1
         k = kind(ch)
-        if buf and (joiner or k == 1 or (k == 2 and ri_open)
-                    or (k > 2 and lead)):
+        if buf and (joiner or k == 1 or (k == 2 and ri_open) or (k > 2 and lead)):
             buf += ch
             ri_open = False
         else:
@@ -677,8 +753,7 @@ def _clusters_plain(text: str) -> Iterator[str]:
     lead = False
     for ch in text:
         k = kind(ch)
-        if buf and (joiner or k == 1 or (k == 2 and ri_open)
-                    or (k > 2 and lead)):
+        if buf and (joiner or k == 1 or (k == 2 and ri_open) or (k > 2 and lead)):
             buf += ch
             ri_open = False
         else:
@@ -697,7 +772,7 @@ def _pieces(
     ambiguous_width: int,
     ruby: bool = False,
     ruby_width: str = "full",
-) -> Iterator[Tuple[str, int]]:
+) -> Iterator[tuple[str, int]]:
     """Yield ``(cluster, width)`` pairs.
 
     With ``ruby=True`` every ruby notation is yielded as one indivisible
@@ -711,20 +786,20 @@ def _pieces(
             yield cl, width(cl, ambiguous_width)
         return
     pos = 0
-    held: Optional[Tuple[str, int]] = None  # previous ruby unit
+    held: tuple[str, int] | None = None  # previous ruby unit
     for m in _RUBY_RE.finditer(text):
-        seg = text[pos:m.start()]
+        seg = text[pos : m.start()]
         if held is not None:
             lead = _LEADING_ANSI_RE.match(seg)
             if lead:
                 held = (held[0] + lead.group(), held[1])
-                seg = seg[lead.end():]
+                seg = seg[lead.end() :]
             yield held
         pre = ""
         tail = _TRAILING_ANSI_RE.search(seg)
         if tail:
             pre = tail.group()
-            seg = seg[:tail.start()]
+            seg = seg[: tail.start()]
         for cl in _clusters(seg):
             yield cl, width(cl, ambiguous_width)
         unit = m.group()
@@ -738,7 +813,7 @@ def _pieces(
         lead = _LEADING_ANSI_RE.match(seg)
         if lead:
             held = (held[0] + lead.group(), held[1])
-            seg = seg[lead.end():]
+            seg = seg[lead.end() :]
         yield held
     for cl in _clusters(seg):
         yield cl, width(cl, ambiguous_width)
@@ -751,7 +826,7 @@ def _base(cl: str) -> str:
     return cl[:1]
 
 
-def _last_base(word: List[str]) -> str:
+def _last_base(word: list[str]) -> str:
     """Base character of the last visible cluster of a word run."""
     for c in reversed(word):
         b = c if len(c) == 1 else _base(c)
@@ -787,7 +862,7 @@ def _atoms(
     rules: KinsokuRules = _JA,
     ruby: bool = False,
     ruby_width: str = "full",
-) -> List[_Unit]:
+) -> list[_Unit]:
     """Split text into atoms: spaces, word runs, single wide clusters.
 
     A word run is a run of narrow clusters. Punctuation such as ``.`` ``,``
@@ -802,12 +877,12 @@ def _atoms(
     A ruby notation (``ruby=True``) is one atom, or part of a latin word
     when its base text starts with a narrow character.
     """
-    atoms: List[_Unit] = []
-    word: List[str] = []  # clusters of the current word run
+    atoms: list[_Unit] = []
+    word: list[str] = []  # clusters of the current word run
     word_w = 0
     # (cluster, width) of infix punctuation after an ASCII word, kept in the
     # word only if another ASCII word character follows
-    pend: List[Tuple[str, int]] = []
+    pend: list[tuple[str, int]] = []
     append = atoms.append
     cw = _char_width
     no_start = rules.no_start
@@ -828,7 +903,7 @@ def _atoms(
             pend.clear()
 
     if ruby and "《" in text:
-        src: Iterable = _ruby_items(text, ambiguous_width, ruby_width)
+        src: Iterable[Any] = _ruby_items(text, ambiguous_width, ruby_width)
         rmode = True
     else:
         src = _clusters(text)
@@ -837,7 +912,7 @@ def _atoms(
     # ASCII quotes next to CJK text (#52): decide open/close up front, since
     # that needs the next character
     qs = rules.quotes - no_start - no_end
-    qdec: Optional[Iterator[Optional[bool]]] = None
+    qdec: Iterator[bool | None] | None = None
     if qs and not keep_all and any(q in text for q in qs):
         src = list(src)
         qdec = iter(_quote_kinds(src, rmode, qs, no_start, no_end))
@@ -858,8 +933,10 @@ def _atoms(
             if word or pend:
                 flush()
             append(_Unit(cl, w or 1, space=True))
-        elif b and not keep_all and (
-            bw >= 2 or b in no_start or b in no_end or "\uff61" <= b <= "\uff9f"
+        elif (
+            b
+            and not keep_all
+            and (bw >= 2 or b in no_start or b in no_end or "\uff61" <= b <= "\uff9f")
         ):
             if b in sound:
                 # ﾞ ﾟ: never separated from the preceding cluster
@@ -912,12 +989,12 @@ def _atoms(
 
 
 def _quote_kinds(
-    items: List,
+    items: list[Any],
     rmode: bool,
-    qs: FrozenSet[str],
-    no_start: FrozenSet[str],
-    no_end: FrozenSet[str],
-) -> List[Optional[bool]]:
+    qs: frozenset[str],
+    no_start: frozenset[str],
+    no_end: frozenset[str],
+) -> list[bool | None]:
     """Classify each quote in ``items`` (clusters or ruby items) for :func:`_atoms`.
 
     ``True`` is an opening quote, ``False`` a closing one and ``None`` a
@@ -936,8 +1013,8 @@ def _quote_kinds(
             bases.append(it[2])
         else:
             bases.append(it if len(it) == 1 else _base(it))
-    kinds: List[Optional[bool]] = []
-    depth: Dict[str, int] = {}
+    kinds: list[bool | None] = []
+    depth: dict[str, int] = {}
     wch = _WORD_CH
     prev = ""
     n = len(bases)
@@ -949,16 +1026,14 @@ def _quote_kinds(
             while j < n and not bases[j]:
                 j += 1
             nxt = bases[j] if j < n else ""
-            kind: Optional[bool]
+            kind: bool | None
             if not nxt or nxt in _SPACES:
                 kind = False if prev and prev not in _SPACES else None
             elif not prev or prev in _SPACES or prev in no_end:
                 kind = True
             elif nxt in no_start:
                 kind = False
-            elif (prev in wch and nxt in wch) or (
-                prev[0] < "\x80" and nxt[0] < "\x80"
-            ):
+            elif (prev in wch and nxt in wch) or (prev[0] < "\x80" and nxt[0] < "\x80"):
                 # Between two ASCII characters (``key:"value"``) the quote
                 # stays part of the latin word, as before; the depth rule is
                 # only for quotes touching non-ASCII text (``彼は"テスト"と``).
@@ -976,7 +1051,7 @@ def _quote_kinds(
 
 def _ruby_items(
     text: str, ambiguous_width: int, ruby_width: str
-) -> Iterator[Tuple[str, int, str, int]]:
+) -> Iterator[tuple[str, int, str, int]]:
     """``(cluster, width, base, base_width)`` for :func:`_atoms` with ruby."""
     for cl, w in _pieces(text, ambiguous_width, True, ruby_width):
         b = _base(cl)
@@ -987,13 +1062,13 @@ def _ruby_items(
 
 
 def _glue(
-    atoms: List[_Unit],
+    atoms: list[_Unit],
     hanging: bool,
     ambiguous_width: int,
     rules: KinsokuRules = _JA,
-) -> List[_Unit]:
+) -> list[_Unit]:
     """Merge atoms that must not be separated according to kinsoku rules."""
-    units: List[_Unit] = []
+    units: list[_Unit] = []
     no_start = rules.no_start
     no_end = rules.no_end
     for a in atoms:
@@ -1031,7 +1106,7 @@ def _split_prep(
     ruby: bool = False,
     ruby_width: str = "full",
     rules: KinsokuRules = _JA,
-) -> Tuple[List[str], List[int], FrozenSet[int]]:
+) -> tuple[list[str], list[int], frozenset[int]]:
     """Clusters of ``u``, their widths and the indices no break may come
     before (next to a quote, #52), for :func:`_chunk_end`."""
     if ruby:
@@ -1043,7 +1118,7 @@ def _split_prep(
         ws = [width(c, ambiguous_width) for c in cls]
     if "ﾞ" in u.text or "ﾟ" in u.text:
         cls, ws = _join_sound_marks(cls, ws)
-    nobreak: FrozenSet[int] = frozenset()
+    nobreak: frozenset[int] = frozenset()
     qs = rules.quotes - rules.no_start - rules.no_end
     if qs and any(q in u.text for q in qs):
         kinds = iter(_quote_kinds(cls, False, qs, rules.no_start, rules.no_end))
@@ -1059,13 +1134,13 @@ def _split_prep(
 
 
 def _chunk_end(
-    cls: List[str],
-    ws: List[int],
+    cls: list[str],
+    ws: list[int],
     start: int,
     limit: int,
     rules: KinsokuRules = _JA,
     ruby: bool = False,
-    nobreak: FrozenSet[int] = frozenset(),
+    nobreak: frozenset[int] = frozenset(),
 ) -> int:
     """End index of the hard-split chunk that starts at ``cls[start]``.
 
@@ -1077,9 +1152,7 @@ def _chunk_end(
     def good_break(i: int) -> bool:
         # breaking before cls[i] respects kinsoku
         return (
-            _first(cls[i]) not in no_start
-            and _last(cls[i - 1]) not in no_end
-            and i not in nobreak
+            _first(cls[i]) not in no_start and _last(cls[i - 1]) not in no_end and i not in nobreak
         )
 
     n = len(cls)
@@ -1107,13 +1180,13 @@ def _split_long(
     rules: KinsokuRules = _JA,
     ruby: bool = False,
     ruby_width: str = "full",
-) -> List[_Unit]:
+) -> list[_Unit]:
     """Hard-split an over-long unit into chunks no wider than ``limit``.
 
     Ruby notations (``ruby=True``) are never split.
     """
     cls, ws, nobreak = _split_prep(u, ambiguous_width, ruby, ruby_width, rules)
-    chunks: List[_Unit] = []
+    chunks: list[_Unit] = []
     start = 0
     n = len(cls)
     while start < n:
@@ -1125,7 +1198,7 @@ def _split_long(
 
 def _strip_wide_ruby(text: str, limit: int, aw: int, ruby_width: str) -> str:
     """Replace each ruby notation of ``text`` wider than ``limit`` by its base."""
-    out: List[str] = []
+    out: list[str] = []
     for cl, w in _pieces(text, aw, True, ruby_width):
         if w > limit and "《" in cl:
             cl = strip_ruby(cl)  # escapes around the notation are kept
@@ -1134,14 +1207,14 @@ def _strip_wide_ruby(text: str, limit: int, aw: int, ruby_width: str) -> str:
 
 
 def _unruby_wide(
-    units: List[_Unit],
+    units: list[_Unit],
     limit: int,
     hanging: bool,
     keep_all: bool,
     aw: int,
     rules: KinsokuRules,
     ruby_width: str,
-) -> List[_Unit]:
+) -> list[_Unit]:
     """Make ruby notations that fit on no line breakable (#51).
 
     A ruby notation wider than ``limit`` (the widest line) cannot be kept
@@ -1150,7 +1223,7 @@ def _unruby_wide(
     re-attached to parts of the base: which reading belongs to which base
     character is unknown (``｜魔法少女《マジカルガール》``).
     """
-    out: List[_Unit] = []
+    out: list[_Unit] = []
     for u in units:
         if u.space or u.width - u.hang <= limit or "《" not in u.text:
             out.append(u)
@@ -1159,19 +1232,15 @@ def _unruby_wide(
         if text == u.text:
             out.append(u)
             continue
-        out.extend(_glue(
-            _atoms(text, aw, keep_all, rules, True, ruby_width), hanging, aw, rules
-        ))
+        out.extend(_glue(_atoms(text, aw, keep_all, rules, True, ruby_width), hanging, aw, rules))
     return out
 
 
-def _join_sound_marks(
-    cls: List[str], ws: List[int]
-) -> Tuple[List[str], List[int]]:
+def _join_sound_marks(cls: list[str], ws: list[int]) -> tuple[list[str], list[int]]:
     """Merge each halfwidth ﾞ / ﾟ into the preceding cluster."""
-    out_c: List[str] = []
-    out_w: List[int] = []
-    for c, w in zip(cls, ws):
+    out_c: list[str] = []
+    out_w: list[int] = []
+    for c, w in zip(cls, ws, strict=True):
         if out_c and _base(c) in _HW_SOUND:
             out_c[-1] += c
             out_w[-1] += w
@@ -1192,7 +1261,7 @@ def _wrap_line(
     rules: KinsokuRules = _JA,
     ruby: bool = False,
     ruby_width: str = "full",
-) -> List[str]:
+) -> list[str]:
     units = _glue(
         _atoms(line, ambiguous_width, keep_all, rules, ruby, ruby_width),
         hanging,
@@ -1201,11 +1270,16 @@ def _wrap_line(
     )
     if ruby and break_long_words and "《" in line:
         units = _unruby_wide(
-            units, max(first_width, rest_width), hanging, keep_all,
-            ambiguous_width, rules, ruby_width,
+            units,
+            max(first_width, rest_width),
+            hanging,
+            keep_all,
+            ambiguous_width,
+            rules,
+            ruby_width,
         )
-    lines: List[str] = []
-    cur: List[_Unit] = []
+    lines: list[str] = []
+    cur: list[_Unit] = []
     cur_w = 0
     pending = ""  # escapes of dropped spaces at the start of a line
     lead = True  # cur holds only the paragraph's leading whitespace (#21)
@@ -1252,9 +1326,7 @@ def _wrap_line(
             avail = limit() - cur_w
             if cur and break_long_words and u.width - u.hang > limit() and avail >= 1:
                 # an over-long word after the indent: split it into the rest
-                pieces = _split_long(
-                    u, avail, ambiguous_width, rules, ruby, ruby_width
-                )
+                pieces = _split_long(u, avail, ambiguous_width, rules, ruby, ruby_width)
                 if len(pieces) >= 2 and pieces[0].width <= avail:
                     cur.append(pieces[0])
                     flush()
@@ -1312,7 +1384,7 @@ def wrap(
     hanging: bool = False,
     break_long_words: bool = True,
     keep_all: bool = False,
-    max_lines: Optional[int] = None,
+    max_lines: int | None = None,
     placeholder: str = "…",
     ambiguous_width: int = 1,
     rules: RulesLike = "ja",
@@ -1320,7 +1392,7 @@ def wrap(
     ruby: bool = False,
     ruby_width: str = "full",
     tabsize: int = 8,
-) -> List[str]:
+) -> list[str]:
     """Wrap ``text`` so every line fits in ``width`` terminal columns.
 
     Existing newlines are kept as hard line breaks (each input line is a
@@ -1393,19 +1465,27 @@ def wrap(
         raise ValueError("ruby_width must be 'base' or 'full'")
 
     # (indent, body) pairs; the indent stays outside any re-opened styling
-    pairs: List[tuple] = []
+    pairs: list[tuple[str, str]] = []
     for line in text.splitlines() or [""]:
         if "\t" in line:
             line = _expand_tabs(line, tabsize, ambiguous_width)
         wrapped = _wrap_line(
-            line, width - iw, width - sw, hanging, break_long_words, keep_all,
-            ambiguous_width, rules, ruby, ruby_width,
+            line,
+            width - iw,
+            width - sw,
+            hanging,
+            break_long_words,
+            keep_all,
+            ambiguous_width,
+            rules,
+            ruby,
+            ruby_width,
         )
         # an escape-only line is visually empty, like "": no indent (#34)
         first = wrapped[0]
         visible = strip_ansi(first) if "\x1b" in first else first
         pairs.append((initial_indent if visible else "", first))
-        pairs.extend((subsequent_indent, l) for l in wrapped[1:])
+        pairs.extend((subsequent_indent, line) for line in wrapped[1:])
 
     cut = max_lines is not None and len(pairs) > max_lines
     if cut:
@@ -1415,8 +1495,15 @@ def wrap(
         out = [i + b for i, b in pairs]
         if cut:
             body = _cut_for_placeholder(
-                out[-1], width, placeholder, ambiguous_width, rules, ruby,
-                ruby_width, pairs[-1][0], len(out) == 1,
+                out[-1],
+                width,
+                placeholder,
+                ambiguous_width,
+                rules,
+                ruby,
+                ruby_width,
+                pairs[-1][0],
+                len(out) == 1,
             )
             if body is None:
                 # nothing of the last line fits: like textwrap, end the
@@ -1426,8 +1513,9 @@ def wrap(
                     out[-1] += _close_after("".join(out)) + placeholder
                 else:
                     out.append(
-                        _lone_placeholder(pairs[-1][0], placeholder, width, ambiguous_width)
-                        .replace("\0", _close_after("".join(out)))
+                        _lone_placeholder(
+                            pairs[-1][0], placeholder, width, ambiguous_width
+                        ).replace("\0", _close_after("".join(out)))
                     )
                 return out
             # close whatever is open at the cut (styling may come from
@@ -1442,23 +1530,32 @@ def wrap(
             start = state.copy()
             line = indent + (start.open() if body else "") + body
             kept = _cut_for_placeholder(
-                line, width, placeholder, ambiguous_width, rules, ruby,
-                ruby_width, indent, k == 0,
+                line,
+                width,
+                placeholder,
+                ambiguous_width,
+                rules,
+                ruby,
+                ruby_width,
+                indent,
+                k == 0,
             )
             if kept is None:
                 if out and _w(out[-1], ambiguous_width) + _w(placeholder, ambiguous_width) <= width:
                     out[-1] += placeholder  # the line is already closed
                 else:
-                    out.append(_lone_placeholder(
-                        indent, placeholder, width, ambiguous_width
-                    ).replace("\0", ""))
+                    out.append(
+                        _lone_placeholder(indent, placeholder, width, ambiguous_width).replace(
+                            "\0", ""
+                        )
+                    )
                 break
             if len(kept) < len(indent):  # the cut ate into the indent
                 end = _AnsiState()
                 end.feed_text(kept)
             else:
                 end = start
-                end.feed_text(kept[len(indent):])
+                end.feed_text(kept[len(indent) :])
             out.append(kept + end.close() + placeholder)
         else:
             out.append(indent + _reflow_body(body, state))
@@ -1477,14 +1574,10 @@ def _lone_placeholder(indent: str, placeholder: str, width_: int, aw: int) -> st
 def _is_word(text: str, aw: int) -> bool:
     """Whether ``text`` is made only of narrow characters (a latin word)."""
     v = strip_ansi(text) if "\x1b" in text else text
-    return all(
-        _char_width(c, aw) == 1 and not "\uff61" <= c <= "\uff9f" for c in v
-    )
+    return all(_char_width(c, aw) == 1 and not "\uff61" <= c <= "\uff9f" for c in v)
 
 
-def _cut_units(
-    text: str, aw: int, rules: KinsokuRules, ruby: bool, ruby_width: str
-) -> List[_Unit]:
+def _cut_units(text: str, aw: int, rules: KinsokuRules, ruby: bool, ruby_width: str) -> list[_Unit]:
     """Units the placeholder cut drops one at a time.
 
     A latin word (a run of narrow characters, with the punctuation attached
@@ -1492,7 +1585,7 @@ def _cut_units(
     halfwidth kana and a ruby notation are units of their own; spaces are
     separate units.
     """
-    out: List[_Unit] = []
+    out: list[_Unit] = []
     prev_word = False
     for a in _atoms(text, aw, False, rules, ruby, ruby_width):
         word = not a.space and _is_word(a.text, aw)
@@ -1519,7 +1612,7 @@ def _cut_for_placeholder(
     ruby_width: str = "full",
     indent: str = "",
     alone: bool = True,
-) -> Optional[str]:
+) -> str | None:
     """Cut ``line`` so that ``placeholder`` can follow it within ``width_``.
 
     ``line`` starts with ``indent``, which is kept.  The rest is shortened
@@ -1534,16 +1627,14 @@ def _cut_for_placeholder(
     pw = _w(placeholder, aw)
     if pw > width_:
         raise ValueError("placeholder is wider than width")
-    body = line[len(indent):]
+    body = line[len(indent) :]
     budget = width_ - pw - _w(indent, aw)
     no_end = _first(placeholder) in rules.no_start
     units = _cut_units(body, aw, rules, ruby, ruby_width)
     kept = list(units)
     total = sum(u.width for u in kept)
     while kept and (
-        total > budget
-        or kept[-1].space
-        or no_end and _last(kept[-1].text) in rules.no_end
+        total > budget or kept[-1].space or no_end and _last(kept[-1].text) in rules.no_end
     ):
         total -= kept.pop().width
     if any(not u.space and _visible(u.text) for u in kept):
@@ -1565,12 +1656,13 @@ def _cut_for_placeholder(
     pieces = list(_pieces(body, aw))
     if "ﾞ" in body or "ﾟ" in body:
         cls, ws = _join_sound_marks([c for c, _ in pieces], [w for _, w in pieces])
-        pieces = list(zip(cls, ws))
+        pieces = list(zip(cls, ws, strict=True))
     total = sum(w for _, w in pieces)
     while pieces and (
         total > budget
         or _first(pieces[-1][0]) in _SPACES
-        or no_end and _first(pieces[-1][0]) in rules.no_end
+        or no_end
+        and _first(pieces[-1][0]) in rules.no_end
     ):
         total -= pieces.pop()[1]
     kept_text = "".join(c for c, _ in pieces)
@@ -1579,12 +1671,12 @@ def _cut_for_placeholder(
     return indent + kept_text
 
 
-def fill(text: str, width: int = 70, **kwargs) -> str:
+def fill(text: str, width: int = 70, **kwargs: Any) -> str:
     """Like :func:`wrap` but return a single string joined by newlines."""
     return "\n".join(wrap(text, width, **kwargs))
 
 
-def shorten(text: str, width: int, placeholder: str = "…", **kwargs) -> str:
+def shorten(text: str, width: int, placeholder: str = "…", **kwargs: Any) -> str:
     """Wrap ``text`` and keep only what fits on one line (like textwrap.shorten,
     but whitespace is not collapsed and kinsoku is respected)."""
     return wrap(text, width, max_lines=1, placeholder=placeholder, **kwargs)[0]
@@ -1623,7 +1715,7 @@ def truncate(
     pw = _w(placeholder, ambiguous_width)
     if pw > width:
         raise ValueError("placeholder is wider than width")
-    parts: List[str] = []
+    parts: list[str] = []
     bw = 0
     for cl in _clusters(text):
         cw = _w(cl, ambiguous_width)

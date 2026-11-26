@@ -53,7 +53,8 @@ def test_bold_and_dim_share_off_code():
 def test_escape_before_break_space_is_kept():
     # the reset sits on the space that is trimmed at the break
     assert wrap(RED + "ab " + RESET + "cd", 2, ansi_reflow=True) == [
-        "\x1b[31mab\x1b[0m", "cd",
+        "\x1b[31mab\x1b[0m",
+        "cd",
     ]
 
 
@@ -114,8 +115,11 @@ def test_link_and_color_together():
 
 def test_indent_stays_outside_style():
     out = wrap(
-        RED + "あいうえおか" + RESET, 6,
-        initial_indent="> ", subsequent_indent="  ", ansi_reflow=True,
+        RED + "あいうえおか" + RESET,
+        6,
+        initial_indent="> ",
+        subsequent_indent="  ",
+        ansi_reflow=True,
     )
     assert out == [
         "> \x1b[31mあい\x1b[0m",
@@ -155,8 +159,11 @@ def test_max_lines_closes_link():
 
 def test_max_lines_with_indent_and_no_style_on_last():
     out = wrap(
-        RED + "あい" + RESET + "うえおかきく", 6,
-        subsequent_indent="  ", max_lines=2, ansi_reflow=True,
+        RED + "あい" + RESET + "うえおかきく",
+        6,
+        subsequent_indent="  ",
+        max_lines=2,
+        ansi_reflow=True,
     )
     assert out == ["\x1b[31mあい\x1b[0mう", "  え…"]
 

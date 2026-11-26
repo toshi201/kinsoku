@@ -3,7 +3,7 @@ import unicodedata
 import pytest
 
 import kinsoku
-from kinsoku import HANGABLE, NO_END, NO_START, tategaki, width
+from kinsoku import NO_START, tategaki, width
 from kinsoku.cli import main
 from kinsoku.tategaki import VERTICAL_FORMS
 
@@ -22,8 +22,9 @@ def grid(out, gap=1):
             # Rows may mix wide and narrow chars; walk by display width.
             pos, start, cell = 0, (ncols - 1 - c) * step, ""
             for ch in row:
-                if start <= pos < start + 2 or (pos == start + 2 and kinsoku.char_width(ch) == 0
-                                                and cell):
+                if start <= pos < start + 2 or (
+                    pos == start + 2 and kinsoku.char_width(ch) == 0 and cell
+                ):
                     cell += ch
                 pos += kinsoku.char_width(ch)
             cells.append(cell)
@@ -59,12 +60,15 @@ def test_padding_and_equal_widths():
     assert_aligned(out)
 
 
-@pytest.mark.parametrize("text", [
-    "吾輩は猫である。名前はまだ無い。",
-    "「ニャーニャー」泣いていた。\n2024年、ABC！",
-    "éか゚abc\tdef\n\nx",
-    "\x1b[31m赤い\x1b[0m文字……（注）",
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "吾輩は猫である。名前はまだ無い。",
+        "「ニャーニャー」泣いていた。\n2024年、ABC！",
+        "éか゚abc\tdef\n\nx",
+        "\x1b[31m赤い\x1b[0m文字……（注）",
+    ],
+)
 @pytest.mark.parametrize("height", [1, 2, 3, 5, 8])
 @pytest.mark.parametrize("halfwidth", ["fullwidth", "pair"])
 @pytest.mark.parametrize("hanging", [True, False])
@@ -83,7 +87,7 @@ def test_gap():
 
 
 def test_vertical_forms_are_valid():
-    for src, dst in VERTICAL_FORMS.items():
+    for dst in VERTICAL_FORMS.values():
         unicodedata.name(dst)  # raises if unassigned
     assert VERTICAL_FORMS["「"] == "﹁"
     assert unicodedata.name(VERTICAL_FORMS["。"]).startswith("PRESENTATION FORM FOR VERTICAL")
@@ -91,8 +95,7 @@ def test_vertical_forms_are_valid():
 
 def test_mapping():
     out = tategaki("「あー」、（い）。…", 20, hanging=False)
-    assert column_text(grid(out)[0]) == [
-        "﹁", "あ", "｜", "﹂", "︑", "︵", "い", "︶", "︒", "︙"]
+    assert column_text(grid(out)[0]) == ["﹁", "あ", "｜", "﹂", "︑", "︵", "い", "︶", "︒", "︙"]
     assert tategaki("『』【】〔〕《》〈〉｛｝", 12).split("\n") == list("﹃﹄︻︼︹︺︽︾︿﹀︷︸")
     assert tategaki("，：；！？‥—―", 8).split("\n") == list("︐︓︔︕︖︰︱︱")
     assert tategaki("～〜", 2).split("\n") == ["≀ ", "≀ "]
@@ -120,7 +123,7 @@ def test_newline_starts_new_column():
 
 @pytest.mark.parametrize("hanging", [True, False])
 def test_punctuation_not_at_column_top(hanging):
-    text = "吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ、「猫」と（小声で）泣いた。"
+    text = "吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ、「猫」と（小声で）泣いた。"  # noqa: E501 (全角文字の例文)
     for h in range(3, 9):
         out = tategaki(text, h, hanging=hanging)
         for col in grid(out):

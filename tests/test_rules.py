@@ -10,6 +10,7 @@ ALL = ("ja", "strict", "loose", "zh-hans", "zh-hant", "ko")
 
 # --- presets -----------------------------------------------------------------
 
+
 def test_preset_names():
     assert tuple(PRESETS) == ALL
 
@@ -95,6 +96,7 @@ def test_korean():
 
 # --- custom rules --------------------------------------------------------------
 
+
 def test_custom_rules_from_strings():
     rules = KinsokuRules(no_start="x", no_end="", hangable="")
     assert rules.no_start == frozenset("x")
@@ -136,6 +138,7 @@ def test_max_lines_placeholder_uses_rules():
 
 # --- errors ---------------------------------------------------------------------
 
+
 def test_unknown_preset():
     with pytest.raises(ValueError) as e:
         wrap("abc", 10, rules="fr")
@@ -154,6 +157,7 @@ def test_bad_rules_type():
 
 # --- cli ------------------------------------------------------------------------
 
+
 def test_cli_rules(tmp_path, capsys):
     f = tmp_path / "a.txt"
     f.write_text("あいッう\n", encoding="utf-8")
@@ -169,8 +173,8 @@ def test_cli_rules_invalid(capsys):
     assert "invalid choice" in capsys.readouterr().err
 
 
-
 # --- KinsokuWrapper ---------------------------------------------------------------
+
 
 def test_wrapper_rules_via_extra():
     from kinsoku import KinsokuWrapper

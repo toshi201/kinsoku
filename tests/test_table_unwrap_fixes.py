@@ -12,23 +12,32 @@ LE = "\x1b]8;;\x1b\\"
 
 # --- #46: OSC 8 links in wrapped table cells -----------------------------------
 
+
 @pytest.mark.parametrize("style", ["grid", "simple", "plain"])
 def test_wrapped_link_is_closed_on_every_line(style):
-    out = table([[L + "リンク付きの長い説明文" + LE, "隣のセル"]],
-                ["リンク", "メモ"], max_col_width=8, style=style)
+    out = table(
+        [[L + "リンク付きの長い説明文" + LE, "隣のセル"]],
+        ["リンク", "メモ"],
+        max_col_width=8,
+        style=style,
+    )
     link_lines = [ln for ln in out.splitlines() if L in ln]
     assert len(link_lines) == 3
     for ln in link_lines:
         # opened once and closed once, before any neighbour cell or border
         assert ln.count(L) == 1 and ln.count(LE) == 1
-        after = ln[ln.index(LE) + len(LE):]
+        after = ln[ln.index(LE) + len(LE) :]
         assert after.strip(" │|") in ("", "隣のセル", "メモ")
     assert link_lines[0].index(LE) < link_lines[0].index("隣のセル")
 
 
 def test_wrapped_link_grid_exact():
-    out = table([[L + "リンク付きの長い説明文" + LE, "隣のセル"]],
-                ["リンク", "メモ"], max_col_width=8, style="grid")
+    out = table(
+        [[L + "リンク付きの長い説明文" + LE, "隣のセル"]],
+        ["リンク", "メモ"],
+        max_col_width=8,
+        style="grid",
+    )
     assert out.splitlines()[3:6] == [
         "│ " + L + "リンク付" + LE + " │ 隣のセル │",
         "│ " + L + "きの長い" + LE + " │          │",
@@ -63,37 +72,43 @@ def test_unwrapped_link_cell_untouched():
 
 
 def test_link_width_unchanged():
-    out = table([[L + "リンク付きの長い説明文" + LE, "隣"]], max_col_width=8,
-                style="grid")
+    out = table([[L + "リンク付きの長い説明文" + LE, "隣"]], max_col_width=8, style="grid")
     widths = {kinsoku.width(ln) for ln in out.splitlines()}
     assert len(widths) == 1
 
 
 # --- #49: unwrap at CJK/latin junctions ------------------------------------------
 
-@pytest.mark.parametrize("text,expected", [
-    ("日本語と\nEnglish\nの混在", "日本語とEnglishの混在"),
-    ("Python\nを使う", "Pythonを使う"),
-    ("合計は\n12,345円", "合計は12,345円"),
-    ("2026年\n11月", "2026年11月"),
-    ("ｶﾀｶﾅ\nabc", "ｶﾀｶﾅabc"),
-    ("The quick\nbrown fox", "The quick brown fox"),   # latin: unchanged
-    ("v1.0\n2.0", "v1.0 2.0"),
-    ("한국어\nPython", "한국어 Python"),               # Hangul keeps the space
-    ("Python\n한국어", "Python 한국어"),
-    ("日本語\n한국어", "日本語한국어"),                 # both wide: as before
-])
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("日本語と\nEnglish\nの混在", "日本語とEnglishの混在"),
+        ("Python\nを使う", "Pythonを使う"),
+        ("合計は\n12,345円", "合計は12,345円"),
+        ("2026年\n11月", "2026年11月"),
+        ("ｶﾀｶﾅ\nabc", "ｶﾀｶﾅabc"),
+        ("The quick\nbrown fox", "The quick brown fox"),  # latin: unchanged
+        ("v1.0\n2.0", "v1.0 2.0"),
+        ("한국어\nPython", "한국어 Python"),  # Hangul keeps the space
+        ("Python\n한국어", "Python 한국어"),
+        ("日本語\n한국어", "日本語한국어"),  # both wide: as before
+    ],
+)
 def test_default_no_space_between_cjk_and_latin(text, expected):
     assert unwrap(text) == expected
 
 
-@pytest.mark.parametrize("text,expected", [
-    ("日本語と\nEnglish\nの混在", "日本語と English の混在"),
-    ("Python\nを使う", "Python を使う"),
-    ("The quick\nbrown fox", "The quick brown fox"),
-    ("吾輩は\n猫である", "吾輩は猫である"),
-    ("使う。\nThen", "使う。Then"),
-])
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("日本語と\nEnglish\nの混在", "日本語と English の混在"),
+        ("Python\nを使う", "Python を使う"),
+        ("The quick\nbrown fox", "The quick brown fox"),
+        ("吾輩は\n猫である", "吾輩は猫である"),
+        ("使う。\nThen", "使う。Then"),
+    ],
+)
 def test_cjk_latin_space_option(text, expected):
     assert unwrap(text, cjk_latin_space=True) == expected
 
@@ -106,8 +121,7 @@ def test_issue_examples():
 
 
 MIXED = [
-    "これはPythonで2026年11月に書いた文章です。kinsokuというライブラリを使い、"
-    "80桁で折り返します。",
+    "これはPythonで2026年11月に書いた文章です。kinsokuというライブラリを使い、80桁で折り返します。",
     "値は1,000円です。合計は12,345円。日本語とEnglishの混在です。",
     "Hello Worldと表示するプログラムをC言語で書いた。iPhone 15とPixel 9を比べる。",
     "第3章ではHTTP/2とTLS1.3を扱う。APIキーはenv変数に入れる。",

@@ -15,6 +15,7 @@ UNITS = ["｜東京駅《とうきょうえき》", "漢字《かんじ》"]
 
 # --- wrap ------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("mode", ["base", "full"])
 # below 4 columns even plain "た。" cannot be kept together
 @pytest.mark.parametrize("w", range(4, 40))
@@ -64,9 +65,7 @@ def test_width_full_counts_notation():
 
 def test_width_base_counts_only_base():
     # only 漢字 (4 columns) counts
-    assert wrap("あ漢字《かんじ》い", 8, ruby=True, ruby_width="base") == [
-        "あ漢字《かんじ》い"
-    ]
+    assert wrap("あ漢字《かんじ》い", 8, ruby=True, ruby_width="base") == ["あ漢字《かんじ》い"]
     assert wrap("あ漢字《かんじ》い", 6, ruby=True, ruby_width="base") == [
         "あ漢字《かんじ》",
         "い",
@@ -147,6 +146,7 @@ def test_not_ruby():
 
 # --- strip_ruby / ruby_to_html ---------------------------------------------
 
+
 def test_strip_ruby():
     assert strip_ruby(TEXT) == "彼は東京駅へ向かった。漢字を書く。"
     assert strip_ruby("a|b《c》d") == "abd"
@@ -155,18 +155,17 @@ def test_strip_ruby():
 
 def test_ruby_to_html():
     assert ruby_to_html("漢字《かんじ》") == "<ruby>漢字<rt>かんじ</rt></ruby>"
-    assert ruby_to_html("｜東京《とうきょう》へ") == (
-        "<ruby>東京<rt>とうきょう</rt></ruby>へ"
-    )
+    assert ruby_to_html("｜東京《とうきょう》へ") == ("<ruby>東京<rt>とうきょう</rt></ruby>へ")
 
 
 def test_ruby_to_html_escapes():
-    assert ruby_to_html("<b>&｜A<B《x&\"y》") == (
+    assert ruby_to_html('<b>&｜A<B《x&"y》') == (
         "&lt;b&gt;&amp;<ruby>A&lt;B<rt>x&amp;&quot;y</rt></ruby>"
     )
 
 
 # --- cli -------------------------------------------------------------------
+
 
 def test_cli_ruby(tmp_path, capsys):
     f = tmp_path / "a.txt"
@@ -211,7 +210,7 @@ def test_kinsoku_wrapper_passes_ruby_through_extra():
 
     w = KinsokuWrapper(14, ruby=True)
     assert w.wrap("あ漢字《かんじ》い") == ["あ", "漢字《かんじ》", "い"]
-    assert KinsokuWrapper(14, ruby=True, ruby_width="base").wrap(
+    assert KinsokuWrapper(14, ruby=True, ruby_width="base").wrap("あ漢字《かんじ》い") == [
         "あ漢字《かんじ》い"
-    ) == ["あ漢字《かんじ》い"]
+    ]
     assert KinsokuWrapper(14).wrap("あ漢字《かんじ》い") != w.wrap("あ漢字《かんじ》い")

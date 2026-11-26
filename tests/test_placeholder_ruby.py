@@ -75,17 +75,15 @@ def test_long_word_cut_by_character():
         "ab",
         "abcdefghi…",
     ]
-    assert wrap("abcdefghijklmnop qr", 10, max_lines=1, break_long_words=False) == [
-        "abcdefghi…"
-    ]
+    assert wrap("abcdefghijklmnop qr", 10, max_lines=1, break_long_words=False) == ["abcdefghi…"]
 
 
 def test_first_word_never_vanishes():
     # textwrap.shorten gives "[...]" here; kinsoku keeps some text
     assert shorten("Hello, world!", 8, placeholder="...") == "Hello..."
-    assert KinsokuWrapper(width=8, max_lines=1, placeholder="...").wrap(
-        "Hello, world!"
-    ) == ["Hello..."]
+    assert KinsokuWrapper(width=8, max_lines=1, placeholder="...").wrap("Hello, world!") == [
+        "Hello..."
+    ]
 
 
 def test_ansi_kept_and_closed():
@@ -96,8 +94,7 @@ def test_ansi_kept_and_closed():
     out = wrap(s, 10, max_lines=2, ansi_reflow=True)
     assert out == ["\x1b[31mone two\x1b[0m", "\x1b[31mthree\x1b[0m…"]
     # placeholder moved to the previous (already closed) line
-    out = wrap("\x1b[31mab cdefghi jkl\x1b[0m", 8, max_lines=2, placeholder="..",
-               ansi_reflow=True)
+    out = wrap("\x1b[31mab cdefghi jkl\x1b[0m", 8, max_lines=2, placeholder="..", ansi_reflow=True)
     assert out == ["\x1b[31mab\x1b[0m.."]
 
 
@@ -116,6 +113,7 @@ def test_fits_and_ends_with_placeholder(text, w, max_lines):
 
 
 # --- #51: ruby notations wider than the line --------------------------------
+
 
 def test_wide_ruby_is_split():
     s = "彼女は｜魔法少女《マジカルガール》になった。"

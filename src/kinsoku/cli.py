@@ -8,7 +8,6 @@ import csv
 import io
 import shutil
 import sys
-from typing import List, Optional
 
 from . import __version__
 from ._core import PRESETS, fill, strip_ruby, truncate, width
@@ -37,7 +36,8 @@ def _read_input(path: str, encoding: str) -> str:
             if encoding == "utf-8-sig" and text.startswith("\ufeff"):
                 text = text[1:]
             return text
-        return buf.read().decode(encoding)
+        data: bytes = buf.read()
+        return data.decode(encoding)
     with open(path, encoding=encoding) as f:
         return f.read()
 
@@ -67,11 +67,22 @@ _OPTIONS = (
     ("--placeholder", "placeholder", None),
 )
 
-_WRAP_OPTS = frozenset({
-    "width", "hanging", "no_break_long_words", "keep_all", "indent",
-    "subsequent_indent", "max_lines", "placeholder", "ambiguous_width",
-    "rules", "ansi_reflow", "tabsize",
-})
+_WRAP_OPTS = frozenset(
+    {
+        "width",
+        "hanging",
+        "no_break_long_words",
+        "keep_all",
+        "indent",
+        "subsequent_indent",
+        "max_lines",
+        "placeholder",
+        "ambiguous_width",
+        "rules",
+        "ansi_reflow",
+        "tabsize",
+    }
+)
 
 # The options each mode accepts ("" is plain wrapping). --encoding and the
 # input files are accepted everywhere.
@@ -81,13 +92,26 @@ _MODE_OPTIONS = {
     "--width-of": frozenset({"ambiguous_width", "tabsize"}),
     # --ruby: the ruby annotations are removed (strip_ruby) before layout
     "--tategaki": frozenset({"gap", "ruby"}),
-    "--table": frozenset({
-        "width", "hanging", "no_break_long_words", "keep_all",
-        "ambiguous_width", "rules", "delimiter", "no_header", "style",
-    }),
+    "--table": frozenset(
+        {
+            "width",
+            "hanging",
+            "no_break_long_words",
+            "keep_all",
+            "ambiguous_width",
+            "rules",
+            "delimiter",
+            "no_header",
+            "style",
+        }
+    ),
     "--unwrap": frozenset({"indent_marks_paragraph", "cjk_latin_space"}),
-    "--rewrap": _WRAP_OPTS | {
-        "ruby", "ruby_width", "indent_marks_paragraph", "cjk_latin_space",
+    "--rewrap": _WRAP_OPTS
+    | {
+        "ruby",
+        "ruby_width",
+        "indent_marks_paragraph",
+        "cjk_latin_space",
     },
 }
 
@@ -112,72 +136,125 @@ def _check_options(p: argparse.ArgumentParser, args: argparse.Namespace, mode: s
         p.error(f"{opt} requires {' or '.join(modes)}")
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="kinsoku",
         description="Wrap Japanese/CJK text by display width with kinsoku shori.",
     )
-    p.add_argument("files", nargs="*",
-                   help="input files; '-' is stdin (default: stdin)")
-    p.add_argument("-w", "--width", type=int, default=None,
-                   help="max columns per line (default: $COLUMNS, terminal width, or 80)")
-    p.add_argument("--hanging", action="store_true",
-                   help="let 、。,. hang past the margin (ぶら下げ)")
-    p.add_argument("--no-break-long-words", action="store_true",
-                   help="never split words wider than the line")
-    p.add_argument("--keep-all", action="store_true",
-                   help="break only at spaces (word-break: keep-all, for Korean)")
-    p.add_argument("-i", "--indent", default="",
-                   help="indent for the first line of each paragraph (e.g. '　')")
-    p.add_argument("-s", "--subsequent-indent", default="",
-                   help="indent for the other lines")
-    p.add_argument("-n", "--max-lines", type=int, default=None,
-                   help="keep at most N lines, ending with …")
-    p.add_argument("--ambiguous-width", type=int, choices=(1, 2), default=1,
-                   help="width of East Asian Ambiguous chars (default: 1)")
-    p.add_argument("--rules", choices=tuple(PRESETS), default="ja",
-                   help="kinsoku rules preset (default: ja)")
-    p.add_argument("--ansi-reflow", action="store_true",
-                   help="close ANSI colors/links at each line end and reopen them on the next line")
-    p.add_argument("--ruby", action="store_true",
-                   help="keep ruby notation (｜漢字《かんじ》) unbroken")
-    p.add_argument("--ruby-width", choices=("base", "full"), default="full",
-                   help="with --ruby: count only the base text (base) or the "
-                        "whole notation (full, default)")
-    p.add_argument("--tabsize", type=int, default=8,
-                   help="expand tabs to multiples of N columns (default: 8)")
+    p.add_argument("files", nargs="*", help="input files; '-' is stdin (default: stdin)")
+    p.add_argument(
+        "-w",
+        "--width",
+        type=int,
+        default=None,
+        help="max columns per line (default: $COLUMNS, terminal width, or 80)",
+    )
+    p.add_argument(
+        "--hanging", action="store_true", help="let 、。,. hang past the margin (ぶら下げ)"
+    )
+    p.add_argument(
+        "--no-break-long-words", action="store_true", help="never split words wider than the line"
+    )
+    p.add_argument(
+        "--keep-all",
+        action="store_true",
+        help="break only at spaces (word-break: keep-all, for Korean)",
+    )
+    p.add_argument(
+        "-i", "--indent", default="", help="indent for the first line of each paragraph (e.g. '　')"
+    )
+    p.add_argument("-s", "--subsequent-indent", default="", help="indent for the other lines")
+    p.add_argument(
+        "-n", "--max-lines", type=int, default=None, help="keep at most N lines, ending with …"
+    )
+    p.add_argument(
+        "--ambiguous-width",
+        type=int,
+        choices=(1, 2),
+        default=1,
+        help="width of East Asian Ambiguous chars (default: 1)",
+    )
+    p.add_argument(
+        "--rules", choices=tuple(PRESETS), default="ja", help="kinsoku rules preset (default: ja)"
+    )
+    p.add_argument(
+        "--ansi-reflow",
+        action="store_true",
+        help="close ANSI colors/links at each line end and reopen them on the next line",
+    )
+    p.add_argument(
+        "--ruby", action="store_true", help="keep ruby notation (｜漢字《かんじ》) unbroken"
+    )
+    p.add_argument(
+        "--ruby-width",
+        choices=("base", "full"),
+        default="full",
+        help="with --ruby: count only the base text (base) or the whole notation (full, default)",
+    )
+    p.add_argument(
+        "--tabsize", type=int, default=8, help="expand tabs to multiples of N columns (default: 8)"
+    )
     mode = p.add_mutually_exclusive_group()
-    mode.add_argument("--truncate", action="store_true",
-                   help="truncate each line with … instead of wrapping")
-    mode.add_argument("--width-of", action="store_true",
-                   help="print the display width of each input line")
-    mode.add_argument("--tategaki", type=int, default=None, metavar="HEIGHT",
-                   help="vertical layout (縦書き), HEIGHT chars per column")
-    mode.add_argument("--unwrap", action="store_true",
-                   help="join hard-wrapped lines back into paragraphs")
-    mode.add_argument("--rewrap", action="store_true",
-                   help="unwrap, then wrap again to -w columns")
-    mode.add_argument("--table", action="store_true",
-                   help="format CSV/TSV input as a table (-w is the total width budget)")
-    p.add_argument("--gap", type=int, default=None,
-                   help="with --tategaki: spaces between columns (default: 1)")
-    p.add_argument("--indent-marks-paragraph", action="store_true",
-                   help="with --unwrap/--rewrap: an indented line starts a new paragraph")
-    p.add_argument("--delimiter", default=None,
-                   help="CSV delimiter for --table (default: tab if the first line "
-                        "has one, else comma; '\\t' means tab)")
-    p.add_argument("--no-header", action="store_true",
-                   help="with --table: the first row is data, not a header")
-    p.add_argument("--style", choices=STYLES, default="simple",
-                   help="table style for --table (default: simple)")
-    p.add_argument("--placeholder", default=None,
-                   help="marker for cut text with --truncate / -n (default: …)")
-    p.add_argument("--encoding", default="utf-8",
-                   help="input encoding (default: utf-8, a leading BOM is removed; e.g. cp932 / shift_jis "
-                        "for Aozora Bunko texts)")
-    p.add_argument("--cjk-latin-space", action="store_true",
-                   help="with --unwrap/--rewrap: put a space where CJK meets "
-                        "latin text or digits at a line break")
+    mode.add_argument(
+        "--truncate", action="store_true", help="truncate each line with … instead of wrapping"
+    )
+    mode.add_argument(
+        "--width-of", action="store_true", help="print the display width of each input line"
+    )
+    mode.add_argument(
+        "--tategaki",
+        type=int,
+        default=None,
+        metavar="HEIGHT",
+        help="vertical layout (縦書き), HEIGHT chars per column",
+    )
+    mode.add_argument(
+        "--unwrap", action="store_true", help="join hard-wrapped lines back into paragraphs"
+    )
+    mode.add_argument("--rewrap", action="store_true", help="unwrap, then wrap again to -w columns")
+    mode.add_argument(
+        "--table",
+        action="store_true",
+        help="format CSV/TSV input as a table (-w is the total width budget)",
+    )
+    p.add_argument(
+        "--gap", type=int, default=None, help="with --tategaki: spaces between columns (default: 1)"
+    )
+    p.add_argument(
+        "--indent-marks-paragraph",
+        action="store_true",
+        help="with --unwrap/--rewrap: an indented line starts a new paragraph",
+    )
+    p.add_argument(
+        "--delimiter",
+        default=None,
+        help="CSV delimiter for --table (default: tab if the first line "
+        "has one, else comma; '\\t' means tab)",
+    )
+    p.add_argument(
+        "--no-header", action="store_true", help="with --table: the first row is data, not a header"
+    )
+    p.add_argument(
+        "--style",
+        choices=STYLES,
+        default="simple",
+        help="table style for --table (default: simple)",
+    )
+    p.add_argument(
+        "--placeholder", default=None, help="marker for cut text with --truncate / -n (default: …)"
+    )
+    p.add_argument(
+        "--encoding",
+        default="utf-8",
+        help="input encoding (default: utf-8, a leading BOM is removed; e.g. cp932 / shift_jis "
+        "for Aozora Bunko texts)",
+    )
+    p.add_argument(
+        "--cjk-latin-space",
+        action="store_true",
+        help="with --unwrap/--rewrap: put a space where CJK meets "
+        "latin text or digits at a line break",
+    )
     p.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
     args = p.parse_args(argv)
 
@@ -205,8 +282,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         try:
             chunk = _read_input(path, args.encoding)
         except UnicodeDecodeError:
-            p.exit(1, f"{p.prog}: error: {name}: cannot decode as "
-                      f"{args.encoding} (try --encoding, e.g. --encoding cp932)\n")
+            p.exit(
+                1,
+                f"{p.prog}: error: {name}: cannot decode as "
+                f"{args.encoding} (try --encoding, e.g. --encoding cp932)\n",
+            )
         except OSError as e:
             p.exit(1, f"{p.prog}: error: {name}: {e.strerror or e}\n")
         # Each file is its own block: a missing final newline must not
@@ -234,15 +314,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.truncate:
         try:
             for line in text.splitlines():
-                print(truncate(line, w, placeholder=placeholder,
-                               ambiguous_width=args.ambiguous_width,
-                               tabsize=args.tabsize))
+                print(
+                    truncate(
+                        line,
+                        w,
+                        placeholder=placeholder,
+                        ambiguous_width=args.ambiguous_width,
+                        tabsize=args.tabsize,
+                    )
+                )
         except ValueError as e:
             p.error(str(e))
         return 0
     if args.unwrap:
-        out = unwrap(text, indent_marks_paragraph=args.indent_marks_paragraph,
-                     cjk_latin_space=args.cjk_latin_space)
+        out = unwrap(
+            text,
+            indent_marks_paragraph=args.indent_marks_paragraph,
+            cjk_latin_space=args.cjk_latin_space,
+        )
     elif args.rewrap:
         try:
             out = rewrap(

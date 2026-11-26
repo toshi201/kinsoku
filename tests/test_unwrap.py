@@ -3,8 +3,8 @@ import pytest
 from kinsoku import fill, rewrap, strip_ansi, unwrap, width, wrap
 from kinsoku.cli import main
 
-
 # --- joining ----------------------------------------------------------------
+
 
 def test_japanese_lines_join_without_space():
     assert unwrap("吾輩は猫で\nある。名前\nはまだ無い。") == "吾輩は猫である。名前はまだ無い。"
@@ -15,19 +15,22 @@ def test_english_lines_join_with_one_space():
     assert unwrap(text) == "The quick brown fox jumps over the lazy dog."
 
 
-@pytest.mark.parametrize("text,expected", [
-    ("日本語の\nPython", "日本語のPython"),     # #49: no space by default
-    ("Python\nを使う", "Pythonを使う"),
-    ("使う。\nThen", "使う。Then"),
-    ("「\nabc」", "「abc」"),
-    ("abc\n」です", "abc」です"),
-    ("（\nfoo）", "（foo）"),
-    ("v1.0\n2.0", "v1.0 2.0"),
-    ("あ\n　い", "あ　い"),                 # U+3000 kept, no extra space
-    ("待って…\nそして", "待って…そして"),   # … follows the CJK side
-    ("wait…\nthen", "wait… then"),
-    ("ｱｲｳ\nｴｵ", "ｱｲｳｴｵ"),                 # half-width katakana
-])
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("日本語の\nPython", "日本語のPython"),  # #49: no space by default
+        ("Python\nを使う", "Pythonを使う"),
+        ("使う。\nThen", "使う。Then"),
+        ("「\nabc」", "「abc」"),
+        ("abc\n」です", "abc」です"),
+        ("（\nfoo）", "（foo）"),
+        ("v1.0\n2.0", "v1.0 2.0"),
+        ("あ\n　い", "あ　い"),  # U+3000 kept, no extra space
+        ("待って…\nそして", "待って…そして"),  # … follows the CJK side
+        ("wait…\nthen", "wait… then"),
+        ("ｱｲｳ\nｴｵ", "ｱｲｳｴｵ"),  # half-width katakana
+    ],
+)
 def test_mixed_junctions(text, expected):
     assert unwrap(text) == expected
 
@@ -40,6 +43,7 @@ def test_single_line_and_empty():
 
 # --- paragraphs ---------------------------------------------------------------
 
+
 def test_blank_lines_are_preserved_exactly():
     text = "あいう\nえお\n\n  \nかき\nくけ\n\n\nfoo\nbar\n"
     assert unwrap(text) == "あいうえお\n\n  \nかきくけ\n\n\nfoo bar\n"
@@ -51,9 +55,7 @@ def test_crlf():
 
 def test_fullwidth_indent_marks_paragraph():
     text = "　一段落目の\n文です。\n　二段落目\nです。\n"
-    assert unwrap(text, indent_marks_paragraph=True) == (
-        "　一段落目の文です。\n　二段落目です。\n"
-    )
+    assert unwrap(text, indent_marks_paragraph=True) == ("　一段落目の文です。\n　二段落目です。\n")
     # off by default: indented lines are continuation lines
     assert unwrap(text) == "　一段落目の文です。　二段落目です。\n"
 
@@ -65,6 +67,7 @@ def test_halfwidth_indent_marks_paragraph():
 
 
 # --- hyphen and list items ----------------------------------------------------------
+
 
 def test_hyphen_after_latin_letter_is_kept_and_joined():
     assert unwrap("a well-\nknown fact") == "a well-known fact"
@@ -84,6 +87,7 @@ def test_list_items_start_new_paragraphs():
 
 
 # --- ANSI ---------------------------------------------------------------------
+
 
 def test_ansi_at_junction_is_kept_and_ignored_for_classification():
     assert unwrap("\x1b[31m赤い\x1b[0m\nです") == "\x1b[31m赤い\x1b[0mです"
@@ -118,6 +122,7 @@ def test_round_trip_multi_paragraph():
 
 
 # --- rewrap -------------------------------------------------------------------
+
 
 def test_rewrap_japanese():
     text = "吾輩は猫で\nある。名前\nはまだ無い。\n"
@@ -161,6 +166,7 @@ def test_rewrap_fits(w):
 
 
 # --- CLI ----------------------------------------------------------------------
+
 
 def test_cli_unwrap(tmp_path, capsys):
     f = tmp_path / "a.txt"

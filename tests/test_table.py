@@ -67,8 +67,7 @@ def test_none_and_str_conversion():
 def test_wrap_in_cells_with_kinsoku():
     out = table(ROWS, HEADERS, max_col_width=10, style="grid")
     assert len(widths(out)) == 1
-    texts = [line.split("│")[2].strip() for line in out.splitlines()
-             if line.startswith("│")]
+    texts = [line.split("│")[2].strip() for line in out.splitlines() if line.startswith("│")]
     assert all(width(t) <= 10 for t in texts)
     assert "都。人口は" in texts  # 「。」 is pushed along, never starts a line
     for t in filter(None, texts):
@@ -91,19 +90,21 @@ def test_per_column_max_col_width():
     assert out.splitlines() == ["abcd  abcdefgh", "efgh          "]
 
 
-@pytest.mark.parametrize("align,expected", [
-    ("left", ["あ    ", "ああ  "]),
-    ("right", ["    あ", "  ああ"]),
-    ("center", ["  あ  ", " ああ "]),
-])
+@pytest.mark.parametrize(
+    "align,expected",
+    [
+        ("left", ["あ    ", "ああ  "]),
+        ("right", ["    あ", "  ああ"]),
+        ("center", ["  あ  ", " ああ "]),
+    ],
+)
 def test_align_single(align, expected):
     out = table([["あ"], ["ああ"], ["abcdef"]], align=align, style="plain")
     assert out.splitlines()[:2] == expected
 
 
 def test_align_per_column():
-    out = table([["a", "1"], ["bbb", "222"], ["cc", "33"]],
-                align=["left", "right"], style="plain")
+    out = table([["a", "1"], ["bbb", "222"], ["cc", "33"]], align=["left", "right"], style="plain")
     assert out.splitlines() == ["a      1", "bbb  222", "cc    33"]
 
 
@@ -135,8 +136,9 @@ def test_width_budget_not_needed():
 
 
 def test_markdown():
-    out = table([["a|b", "x\ny"], ["あ", 1]], ["h1", "h2"],
-                style="markdown", align=["left", "right"])
+    out = table(
+        [["a|b", "x\ny"], ["あ", 1]], ["h1", "h2"], style="markdown", align=["left", "right"]
+    )
     assert out.splitlines() == [
         "| h1   |     h2 |",
         "| :--- | -----: |",
@@ -204,14 +206,17 @@ def test_empty():
     assert table([], ["a", "b"]) == "a  b\n-  -"
 
 
-@pytest.mark.parametrize("kwargs,msg", [
-    ({"style": "fancy"}, "unknown style"),
-    ({"align": "middle"}, "unknown align"),
-    ({"align": ["left", "left", "left"]}, "align has 3 entries"),
-    ({"max_col_width": 0}, "invalid max_col_width"),
-    ({"width": 0}, "invalid width"),
-    ({"ambiguous_width": 3}, "ambiguous_width"),
-])
+@pytest.mark.parametrize(
+    "kwargs,msg",
+    [
+        ({"style": "fancy"}, "unknown style"),
+        ({"align": "middle"}, "unknown align"),
+        ({"align": ["left", "left", "left"]}, "align has 3 entries"),
+        ({"max_col_width": 0}, "invalid max_col_width"),
+        ({"width": 0}, "invalid width"),
+        ({"ambiguous_width": 3}, "ambiguous_width"),
+    ],
+)
 def test_errors(kwargs, msg):
     with pytest.raises(ValueError, match=msg):
         table([["a", "b"]], **kwargs)
@@ -223,6 +228,7 @@ def test_wrap_kwargs_forwarded():
 
 
 # --- cli -------------------------------------------------------------------
+
 
 def run_cli(monkeypatch, capsys, data, *args):
     monkeypatch.setattr("sys.stdin", io.StringIO(data))
@@ -244,15 +250,17 @@ def test_cli_tsv_autodetect(monkeypatch, capsys):
 def test_cli_explicit_delimiter_and_no_header(monkeypatch, capsys):
     out = run_cli(monkeypatch, capsys, "a;b\nc;d\n", "--delimiter", ";", "--no-header")
     assert out.splitlines() == ["a  b", "c  d"]
-    out = run_cli(monkeypatch, capsys, "a,b\tc\n", "--delimiter", "\\t", "--no-header",
-                  "--style", "plain")
+    out = run_cli(
+        monkeypatch, capsys, "a,b\tc\n", "--delimiter", "\\t", "--no-header", "--style", "plain"
+    )
     assert out.splitlines() == ["a,b  c"]
 
 
 def test_cli_width_budget(monkeypatch, capsys, tmp_path):
     f = tmp_path / "t.csv"
-    f.write_text("都市,説明\n東京,日本の首都。人口は約1400万人で、世界有数の大都市です。\n",
-                 encoding="utf-8")
+    f.write_text(
+        "都市,説明\n東京,日本の首都。人口は約1400万人で、世界有数の大都市です。\n", encoding="utf-8"
+    )
     assert main(["--table", "-w", "24", "--style", "grid", str(f)]) == 0
     out = capsys.readouterr().out
     lines = out.splitlines()
@@ -266,7 +274,8 @@ def test_cli_markdown(monkeypatch, capsys):
 
 
 def test_table_passes_rules_to_wrap():
-    from kinsoku import table as _table, wrap as _wrap
+    from kinsoku import table as _table
+    from kinsoku import wrap as _wrap
 
     plain = _table([["あいッう"]], width=4, style="plain")
     loose = _table([["あいッう"]], width=4, style="plain", rules="loose")

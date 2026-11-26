@@ -14,10 +14,10 @@ import kinsoku
 from kinsoku import HANGABLE, NO_END, NO_START, strip_ansi
 
 KANJI = "吾輩猫名前無生頓見当薄暗所泣記憶人間始書生種族中一番獰悪掌載持上時感"
-KANA = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをんアイウエオカキクケコッャュョー"
+KANA = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをんアイウエオカキクケコッャュョー"  # noqa: E501 (全角文字の定数)
 WORDS = ["Python", "terminal", "UTF-8", "example.com", "supercalifragilisticexpialidocious"]
-_SPACE_BEFORE = re.compile("[ \u3000]+(?=[%s])" % re.escape("".join(NO_START)))
-_SPACE_AFTER = re.compile("([%s])[ \u3000]+" % re.escape("".join(NO_END)))
+_SPACE_BEFORE = re.compile("[ \u3000]+(?=[{}])".format(re.escape("".join(NO_START))))
+_SPACE_AFTER = re.compile("([{}])[ \u3000]+".format(re.escape("".join(NO_END))))
 COLORS = ["\x1b[31m", "\x1b[1;34m", "\x1b[38;5;208m"]
 
 
@@ -67,9 +67,7 @@ def _squash(s: str) -> str:
 @pytest.mark.parametrize("hanging", [False, True])
 def test_invariants(width, hanging):
     init, sub = "> ", "  "
-    whole = kinsoku.wrap(
-        TEXT, width, initial_indent=init, subsequent_indent=sub, hanging=hanging
-    )
+    whole = kinsoku.wrap(TEXT, width, initial_indent=init, subsequent_indent=sub, hanging=hanging)
     rebuilt = []
     for para in PARAS:
         lines = kinsoku.wrap(
@@ -81,7 +79,7 @@ def test_invariants(width, hanging):
         for i, line in enumerate(lines):
             indent = init if i == 0 else sub
             assert line.startswith(indent)
-            line = line[len(indent):]
+            line = line[len(indent) :]
             body.append(line)
 
             # every line fits (hangable punctuation may hang past the margin)

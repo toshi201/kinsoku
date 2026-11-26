@@ -18,18 +18,22 @@ def assert_kinsoku(lines):
 
 # --- width -----------------------------------------------------------------
 
-@pytest.mark.parametrize("s,expected", [
-    ("", 0),
-    ("abc", 3),
-    ("あいう", 6),
-    ("ｱｲｳ", 3),          # half-width katakana
-    ("Ａ", 2),            # full-width latin
-    ("が", 2),            # precomposed
-    ("が", 2),      # combining dakuten
-    ("é", 1),       # combining acute
-    ("👍", 2),
-    ("​", 0),
-])
+
+@pytest.mark.parametrize(
+    "s,expected",
+    [
+        ("", 0),
+        ("abc", 3),
+        ("あいう", 6),
+        ("ｱｲｳ", 3),  # half-width katakana
+        ("Ａ", 2),  # full-width latin
+        ("が", 2),  # precomposed
+        ("が", 2),  # combining dakuten
+        ("é", 1),  # combining acute
+        ("👍", 2),
+        ("​", 0),
+    ],
+)
 def test_width(s, expected):
     assert width(s) == expected
 
@@ -40,6 +44,7 @@ def test_ambiguous_width():
 
 
 # --- wrap ------------------------------------------------------------------
+
 
 def test_plain_japanese_wraps_by_columns():
     lines = wrap("あいうえおかきくけこ", 6)
@@ -131,8 +136,10 @@ def test_fill():
 
 @pytest.mark.parametrize("w", range(2, 30))
 def test_invariants_on_long_text(w):
-    text = ("吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ。"
-            "何でも薄暗いじめじめした所で「ニャーニャー」泣いていた事だけは記憶している。")
+    text = (
+        "吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ。"
+        "何でも薄暗いじめじめした所で「ニャーニャー」泣いていた事だけは記憶している。"
+    )
     lines = wrap(text, w)
     assert "".join(lines) == text
     assert_fits(lines, w)
@@ -143,6 +150,7 @@ def test_invariants_on_long_text(w):
 
 
 # --- truncate / pad ----------------------------------------------------------
+
 
 def test_truncate():
     assert truncate("あいうえお", 6) == "あい…"
@@ -158,6 +166,7 @@ def test_pad():
 
 
 # --- cli -------------------------------------------------------------------
+
 
 def test_cli(tmp_path, capsys):
     f = tmp_path / "in.txt"
@@ -208,6 +217,7 @@ def test_ansi_truncate_resets():
 
 
 # --- v0.2: indent / max_lines / keep_all -----------------------------------
+
 
 def test_initial_indent_per_paragraph():
     lines = wrap("あいうえお\nかきく", 6, initial_indent="　")

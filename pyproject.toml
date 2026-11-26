@@ -20,6 +20,7 @@ dependencies = []
 
 [project.optional-dependencies]
 test = ["pytest", "hypothesis"]
+dev = ["pytest", "hypothesis", "ruff", "mypy", "build", "twine"]
 
 [project.scripts]
 kinsoku = "kinsoku.cli:main"
@@ -36,6 +37,23 @@ include = [
     "/LICENSE",
 ]
 
+[tool.mypy]
+strict = true
+python_version = "3.10"
+files = ["src/kinsoku"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# tests and benchmarks use `l` for "line" in short comprehensions
+"tests/**" = ["E741"]
+"benchmarks/**" = ["E741"]
