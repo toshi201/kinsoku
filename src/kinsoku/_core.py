@@ -303,6 +303,15 @@ class _AnsiState:
         return c
 
 
+def _close_after(text: str) -> str:
+    """Sequence that closes the SGR / OSC 8 state left open by ``text``."""
+    if "\x1b" not in text:
+        return ""
+    state = _AnsiState()
+    state.feed_text(text)
+    return state.close()
+
+
 def _reflow_body(body: str, state: _AnsiState) -> str:
     """Re-open ``state`` before ``body``, update it, close it at the end."""
     if not body:
@@ -820,9 +829,9 @@ def wrap(
             body = _cut_for_placeholder(
                 out[-1], width, placeholder, ambiguous_width, rules, ruby, ruby_width
             )
-            if "\x1b" in out[-1]:
-                body += "\x1b[0m"
-            out[-1] = body + placeholder
+            # close whatever is open at the cut (styling may come from
+            # earlier lines, since they are printed one after another)
+            out[-1] = body + _close_after("".join(out[:-1]) + body) + placeholder
         return out
 
     state = _AnsiState()
@@ -891,8 +900,10 @@ def truncate(
 ) -> str:
     """Cut ``text`` to fit in ``width`` columns, appending ``placeholder``.
 
-    ANSI escape sequences are kept intact; if any are present and the text is
-    cut, a reset sequence is inserted before the placeholder.
+    ANSI escape sequences are kept intact.  If the text is cut while SGR
+    attributes or an OSC 8 hyperlink are active, they are closed (the link
+    with its original BEL or ST terminator) before the placeholder; nothing
+    is added when nothing is open.
     """
     if _w(text, ambiguous_width) <= width:
         return text
@@ -908,9 +919,7 @@ def truncate(
         parts.append(cl)
         bw += cw
     buf = "".join(parts)
-    if "\x1b" in text:
-        buf += "\x1b[0m"
-    return buf + placeholder
+    return buf + _close_after(buf) + placeholder
 
 
 def pad(
