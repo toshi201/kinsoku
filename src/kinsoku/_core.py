@@ -988,6 +988,9 @@ def _atoms(
     return atoms
 
 
+_SENTENCE_END = frozenset("。！？．")
+
+
 def _quote_kinds(
     items: list[Any],
     rmode: bool,
@@ -1005,7 +1008,8 @@ def _quote_kinds(
     characters (``彼は"テスト"と``) closes only if a quote of the same kind
     is open.  That last rule needs a non-ASCII character on at least one
     side; a quote between two ASCII characters (``key:"value"``) is left
-    alone.
+    alone.  A quote that opened English text and is still open at the end
+    of a sentence no longer counts as open (#60).
     """
     bases = []
     for it in items:
@@ -1014,7 +1018,7 @@ def _quote_kinds(
         else:
             bases.append(it if len(it) == 1 else _base(it))
     kinds: list[bool | None] = []
-    depth: dict[str, int] = {}
+    opened: dict[str, list[bool]] = {}  # open quotes: True if opened English text
     wch = _WORD_CH
     prev = ""
     n = len(bases)
@@ -1039,12 +1043,22 @@ def _quote_kinds(
                 # only for quotes touching non-ASCII text (``彼は"テスト"と``).
                 kind = None
             else:
-                kind = not depth.get(b)
+                kind = not opened.get(b)
+            st = opened.setdefault(b, [])
             if kind is True:
-                depth[b] = depth.get(b, 0) + 1
-            elif kind is False and depth.get(b):
-                depth[b] -= 1
+                # Remember whether the quote opened English text (ASCII on
+                # both sides, like ``said "hello``).
+                st.append(prev[:1] < "\x80" and nxt[0] < "\x80")
+            elif kind is False and st:
+                st.pop()
             kinds.append(kind)
+        elif (b in _SENTENCE_END or b in _SPACES and prev in ".!?") and prev:
+            # An English quote still open at the end of a sentence is taken
+            # as unclosed (#60), so that ``He said "hello. 彼は"テスト"と``
+            # does not flip the quotes inside the Japanese text.
+            for st in opened.values():
+                if st and any(st):
+                    st[:] = [x for x in st if not x]
         prev = b
     return kinds
 
@@ -1305,7 +1319,10 @@ def _wrap_line(
         pending = "".join(escapes(x.text) for x in cur) + pending
         cur, cur_w = [], 0
 
-    for u in units:
+    i = 0
+    while i < len(units):
+        u = units[i]
+        i += 1
         if u.space:
             if cur or lead:
                 cur.append(u)
@@ -1316,6 +1333,18 @@ def _wrap_line(
         if pending:
             u = _Unit(pending + u.text, u.width, hang=u.hang)
             pending = ""
+        if ruby and break_long_words and "《" in u.text and cur_w + u.width - u.hang > limit():
+            # The width a ruby notation must fit in is that of the line it
+            # lands on, after the indent and the leading whitespace (#59):
+            # the current line if it holds only leading whitespace, else
+            # the next one.  If it does not fit there, drop its ruby (#51).
+            room = limit() if lead or not cur else rest_width
+            if u.width - u.hang > room:
+                text = _strip_wide_ruby(u.text, room, ambiguous_width, ruby_width)
+                if text != u.text:
+                    atoms = _atoms(text, ambiguous_width, keep_all, rules, True, ruby_width)
+                    units[i:i] = _glue(atoms, hanging, ambiguous_width, rules)
+                    continue
         if cur_w + u.width - u.hang <= limit():
             cur.append(u)
             cur_w += u.width
