@@ -172,6 +172,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--encoding", default="utf-8",
                    help="input encoding (default: utf-8, a leading BOM is removed; e.g. cp932 / shift_jis "
                         "for Aozora Bunko texts)")
+    p.add_argument("--cjk-latin-space", action="store_true",
+                   help="with --unwrap/--rewrap: put a space where CJK meets "
+                        "latin text or digits at a line break")
     p.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
     args = p.parse_args(argv)
 
@@ -235,13 +238,15 @@ def main(argv: Optional[List[str]] = None) -> int:
             p.error(str(e))
         return 0
     if args.unwrap:
-        out = unwrap(text, indent_marks_paragraph=args.indent_marks_paragraph)
+        out = unwrap(text, indent_marks_paragraph=args.indent_marks_paragraph,
+                     cjk_latin_space=args.cjk_latin_space)
     elif args.rewrap:
         try:
             out = rewrap(
                 text,
                 w,
                 indent_marks_paragraph=args.indent_marks_paragraph,
+                cjk_latin_space=args.cjk_latin_space,
                 hanging=args.hanging,
                 break_long_words=not args.no_break_long_words,
                 keep_all=args.keep_all,
