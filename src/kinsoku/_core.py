@@ -926,7 +926,9 @@ def _quote_kinds(
     after a space, the start of the line or an opening bracket opens, one
     before closing punctuation (``"。``) closes, and one between two other
     characters (``彼は"テスト"と``) closes only if a quote of the same kind
-    is open.
+    is open.  That last rule needs a non-ASCII character on at least one
+    side; a quote between two ASCII characters (``key:"value"``) is left
+    alone.
     """
     bases = []
     for it in items:
@@ -954,7 +956,12 @@ def _quote_kinds(
                 kind = True
             elif nxt in no_start:
                 kind = False
-            elif prev in wch and nxt in wch:
+            elif (prev in wch and nxt in wch) or (
+                prev[0] < "\x80" and nxt[0] < "\x80"
+            ):
+                # Between two ASCII characters (``key:"value"``) the quote
+                # stays part of the latin word, as before; the depth rule is
+                # only for quotes touching non-ASCII text (``彼は"テスト"と``).
                 kind = None
             else:
                 kind = not depth.get(b)

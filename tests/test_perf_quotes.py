@@ -205,3 +205,70 @@ def test_quotes_with_ansi_and_ruby():
     assert wrap('彼は"｜漢字《かんじ》"と', 20, ruby=True) == [
         "彼は", '"｜漢字《かんじ》"と'
     ]
+
+
+# --- #52 follow-up: the open-quote count only applies next to non-ASCII ------
+
+def test_unclosed_quote_earlier_does_not_flip_ascii_quotes():
+    # A paragraph that opens a quote and never closes it (the usual way to
+    # quote across paragraphs in English) must not turn a later opening
+    # quote between ASCII characters into a closing one.
+    t = '"Quotes may span paragraphs. Then he typed key:"value" twice.'
+    assert wrap(t, 48) == [
+        '"Quotes may span paragraphs. Then he typed key:',
+        '"value" twice.',
+    ]
+    assert wrap('"start roll v1.2 say:"hi" x"y', 21) == [
+        '"start roll v1.2 say:',
+        '"hi" x"y',
+    ]
+
+
+@pytest.mark.parametrize("rules", ALL)
+@pytest.mark.parametrize(
+    "text",
+    [
+        '"Unclosed start. Then key:"value" and x="abc" here.',
+        "'Unclosed single. Then q:'z' and it's x='abc' ok.",
+        'Some text end" then key:"value" and say:"hi" more.',
+        '" lone quote then key:"value" and a"b"c done',
+        '"one "two "three then x="1" y="2" z="3" end',
+        '"a" "b "c then say:"hi" x"y and q:\'z\' w\'s',
+    ],
+)
+def test_unclosed_quotes_in_english_unchanged(rules, text):
+    r_noq = KinsokuRules.preset(rules).replace(quotes="")
+    for w in range(max(map(len, text.split())), len(text) + 2):
+        assert wrap(text, w, rules=rules) == wrap(text, w, rules=r_noq), w
+
+
+@pytest.mark.parametrize("rules", ALL)
+def test_unclosed_quotes_in_english_random(rules):
+    # Quotes only at word edges next to letters or between ASCII
+    # characters, many of them unbalanced: the result matches quotes="".
+    words = [
+        "he", "typed", "twice", 'key:"value"', 'x="abc"', 'say:"hi"',
+        '"start', 'end"', "don't", "'tis", "rock'n'roll", "v1.2", 'a"b',
+        'foo"', '"bar', "it's", 'x"y', "q:'z'", "'open", "close'",
+    ]
+    r_noq = KinsokuRules.preset(rules).replace(quotes="")
+    rnd = random.Random(5252)
+    for _ in range(300):
+        text = " ".join(rnd.choice(words) for _ in range(rnd.randint(3, 25)))
+        w = rnd.randint(max(map(len, text.split())), 40)
+        assert wrap(text, w, rules=rules) == wrap(text, w, rules=r_noq), (
+            text, w,
+        )
+
+
+@pytest.mark.parametrize("rules", ALL)
+@pytest.mark.parametrize("q", ['"', "'"])
+def test_ascii_quotes_earlier_do_not_break_cjk_fix(rules, q):
+    # Balanced ASCII-context quotes before the CJK sentence (left alone by
+    # the depth rule) do not change how the CJK quotes are classified.
+    for prefix in ["", f"key:{q}value{q}", f"x={q}abc{q}", f"say:{q}hi{q}x{q}y{q}"]:
+        prefix += "、" if prefix else ""
+        text = prefix + f"彼は{q}テスト{q}と言った"
+        n = len(prefix)
+        for w in range(max(len(prefix), 4), 24):
+            _check(text, {n + 2}, {n + 6}, wrap(text, w, rules=rules))
