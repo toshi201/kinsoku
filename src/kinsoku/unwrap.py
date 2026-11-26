@@ -104,7 +104,14 @@ def _is_latin_letter(c: str) -> bool:
     return c.isalpha() and "LATIN" in unicodedata.name(c, "")
 
 
-def _separator(left: str, right: str) -> str:
+def _is_hangul(c: str) -> bool:
+    cp = ord(c)
+    return (0x1100 <= cp <= 0x11FF or 0x3130 <= cp <= 0x318F
+            or 0xA960 <= cp <= 0xA97F or 0xAC00 <= cp <= 0xD7FF
+            or 0xFFA0 <= cp <= 0xFFDC)
+
+
+def _separator(left: str, right: str, cjk_latin_space: bool = False) -> str:
     """Return "" or " " to put between two joined lines (both already stripped)."""
     lv, rv = strip_ansi(left), strip_ansi(right)
     if not lv or not rv:
@@ -115,7 +122,14 @@ def _separator(left: str, right: str) -> str:
     lc, rc = _pick(lv, True), _pick(rv, False)
     if _is_cjk_punct(lc) or _is_cjk_punct(rc):
         return ""
-    if _is_wide(lc) and _is_wide(rc):
+    lw, rw = _is_wide(lc), _is_wide(rc)
+    if lw and rw:
+        return ""
+    # CJK next to latin/digits: Japanese text usually has no space there
+    # (CSS Text 3 segment break rules). Hangul uses spaces between words.
+    if not cjk_latin_space and (
+        (lw and not _is_hangul(lc)) or (rw and not _is_hangul(rc))
+    ):
         return ""
     return " "
 
@@ -131,7 +145,7 @@ def _starts_paragraph(body: str, indent_marks_paragraph: bool) -> bool:
     return indent_marks_paragraph and v[:1] in (" ", "\t", "　")
 
 
-def _paragraphs(text: str, indent_marks_paragraph: bool):
+def _paragraphs(text: str, indent_marks_paragraph: bool, cjk_latin_space: bool = False):
     """Yield ``(is_blank, joined_body, terminator)`` for each output line."""
     cur: Optional[str] = None
     term = ""
@@ -147,13 +161,15 @@ def _paragraphs(text: str, indent_marks_paragraph: bool):
             cur, term = _rstrip_visible(body), t
         else:
             nxt = _lstrip_half(body)
-            cur = cur + _separator(cur, nxt) + _rstrip_visible(nxt)
+            cur = cur + _separator(cur, nxt, cjk_latin_space) + _rstrip_visible(nxt)
             term = t
     if cur is not None:
         yield False, cur, term
 
 
-def unwrap(text: str, *, indent_marks_paragraph: bool = False) -> str:
+def unwrap(
+    text: str, *, indent_marks_paragraph: bool = False, cjk_latin_space: bool = False
+) -> str:
     """Join hard-wrapped lines back into one line per paragraph.
 
     Blank (whitespace-only) lines separate paragraphs and are kept exactly,
@@ -163,7 +179,10 @@ def unwrap(text: str, *, indent_marks_paragraph: bool = False) -> str:
 
     - with no space when the characters on both sides are wide (CJK), or
       either side is CJK punctuation or a bracket (``。」（`` ...);
-    - with one space otherwise (wrapped English text);
+    - with no space when one side is wide (CJK, except Hangul) and the other
+      is latin text or digits (``"Python\\nを使う"`` -> ``"Pythonを使う"``),
+      unless ``cjk_latin_space=True``;
+    - with one space otherwise (wrapped English text, Hangul next to latin);
     - with no space after a hyphen that follows a latin letter, keeping the
       hyphen (``"well-\\nknown"`` -> ``"well-known"``). Hyphens are never
       removed, because a line-end hyphen cannot be told apart from a real one.
@@ -174,9 +193,12 @@ def unwrap(text: str, *, indent_marks_paragraph: bool = False) -> str:
 
     :param indent_marks_paragraph: a line starting with U+3000 or half-width
         spaces starts a new paragraph (its indent is kept).
+    :param cjk_latin_space: put one space where a CJK character meets latin
+        text or digits at a line break (the old default; it adds spaces
+        that ``fill`` did not remove, so the round trip is not exact).
     """
     out: List[str] = []
-    for _, body, term in _paragraphs(text, indent_marks_paragraph):
+    for _, body, term in _paragraphs(text, indent_marks_paragraph, cjk_latin_space):
         out.append(body + term)
     return "".join(out)
 
@@ -191,13 +213,14 @@ def rewrap(
     width: int = 70,
     *,
     indent_marks_paragraph: bool = False,
+    cjk_latin_space: bool = False,
     **wrap_kwargs,
 ) -> str:
     """:func:`unwrap` ``text``, then wrap every paragraph to ``width`` columns.
 
     Blank lines are kept. A paragraph's own leading indentation (e.g. a
     U+3000 kept by ``indent_marks_paragraph=True``) is preserved and added to
-    ``initial_indent``. Other keyword arguments are passed to :func:`wrap`;
+    ``initial_indent``. ``cjk_latin_space`` is passed to :func:`unwrap`. Other keyword arguments are passed to :func:`wrap`;
     ``max_lines`` limits the whole output, like in :func:`wrap`.
     """
     max_lines = wrap_kwargs.pop("max_lines", None)
@@ -208,7 +231,7 @@ def rewrap(
          placeholder=placeholder, **wrap_kwargs)
     nl = "\r\n" if "\r\n" in text else "\n"
 
-    items = list(_paragraphs(text, indent_marks_paragraph))
+    items = list(_paragraphs(text, indent_marks_paragraph, cjk_latin_space))
     lines: List[str] = []
     for i, (blank, body, _term) in enumerate(items):
         lead, rest = ("", "") if blank else _leading_space(body)
