@@ -349,8 +349,16 @@ kinsoku.ruby_to_html("漢字《かんじ》")  # => '<ruby>漢字<rt>かんじ</
 ## 開発
 
 ```bash
-pip install -e . pytest
-pytest
+pip install -e '.[dev]'
+python -m pytest -q
+```
+
+lint と型チェック（CI の lint ジョブと同じもの）:
+
+```bash
+ruff check .                 # lint（自動で直すなら ruff check --fix .）
+ruff format --check .        # 整形の確認（整形するなら ruff format .）
+mypy --strict src/kinsoku    # 型チェック
 ```
 
 ---
