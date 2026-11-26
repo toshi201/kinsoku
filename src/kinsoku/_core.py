@@ -41,6 +41,13 @@ _INFIX = frozenset(".,:;!?%")
 _WORD_CH = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_")
 # characters that may follow infix punctuation (``/`` for ``https://``)
 _INFIX_NEXT = _WORD_CH | {"/"}
+# ASCII brackets that stay inside a word when the opening one directly
+# follows an ASCII word character (``print(x)``, ``a[0]``, ``f{x}``, #65)
+_BRACKETS = {"(": ")", "[": "]", "{": "}"}
+_CLOSERS = frozenset(_BRACKETS.values())
+# characters after which infix punctuation or an opening bracket stays in
+# the word: word characters and a closing bracket kept in the word
+_WORD_END = _WORD_CH | _CLOSERS
 
 
 @dataclass(frozen=True, init=False)
@@ -871,6 +878,10 @@ def _atoms(
     ``v1.2.3``, ``1,000``, ``https://example.com``, ``config.yaml`` -- it
     stays inside the word. Before a symbol (``foo."bar"``, ``end.)``) it
     stays an atom of its own.
+    An ASCII opening bracket ``(`` ``[`` ``{`` right after an ASCII word
+    character, and its matching closing bracket, stay inside the word too
+    (``print(x)``, ``a[0]``, ``foo.bar.baz()``); a bracket before a word
+    (``(see above)``, ``言った(笑)``) is an atom as before.
     Halfwidth katakana are atoms of their own, like wide kana, and the
     halfwidth sound marks ``ﾞ`` ``ﾟ`` always stick to the preceding cluster.
 
@@ -883,17 +894,23 @@ def _atoms(
     # (cluster, width) of infix punctuation after an ASCII word, kept in the
     # word only if another ASCII word character follows
     pend: list[tuple[str, int]] = []
+    # closing brackets expected for the opening brackets kept in the word
+    opened: list[str] = []
     append = atoms.append
     cw = _char_width
     no_start = rules.no_start
     no_end = rules.no_end
     infix = _INFIX
-    wch = _WORD_CH
     infix_next = _INFIX_NEXT
+    word_end = _WORD_END
+    brackets = _BRACKETS
+    closers = _CLOSERS
     sound = _HW_SOUND
 
     def flush() -> None:
         nonlocal word, word_w
+        if opened:
+            opened.clear()
         if word:
             append(_Unit("".join(word), word_w))
             word, word_w = [], 0
@@ -950,7 +967,16 @@ def _atoms(
                     atoms[-1].width += w
                 else:
                     append(_Unit(cl, w))
-            elif b in infix and bw == 1 and not pend and _last_base(word) in wch:
+            elif b in brackets and bw == 1 and not pend and _last_base(word) in word_end:
+                # ``foo(``: the bracket is part of the word (#65)
+                opened.append(brackets[b])
+                word.append(cl)
+                word_w += w
+            elif b in closers and opened and not pend and b == opened[-1]:
+                opened.pop()
+                word.append(cl)
+                word_w += w
+            elif b in infix and bw == 1 and not pend and _last_base(word) in word_end:
                 pend.append((cl, w))
             else:
                 if word or pend:
@@ -1210,14 +1236,30 @@ def _split_long(
     return chunks
 
 
-def _strip_wide_ruby(text: str, limit: int, aw: int, ruby_width: str) -> str:
-    """Replace each ruby notation of ``text`` wider than ``limit`` by its base."""
-    out: list[str] = []
-    for cl, w in _pieces(text, aw, True, ruby_width):
-        if w > limit and "《" in cl:
-            cl = strip_ruby(cl)  # escapes around the notation are kept
-        out.append(cl)
-    return "".join(out)
+def _strip_ruby_to_fit(text: str, room: int, hang: int, aw: int, ruby_width: str) -> str:
+    """Drop ruby from ``text`` (one kinsoku block) until it fits in ``room`` (#63).
+
+    Ruby notations wider than ``room`` lose their ruby first (#51).  If the
+    block, with the punctuation and brackets glued to it, is still too wide,
+    the widest remaining notations lose theirs one by one, until it fits or
+    no ruby is left; the base text is then wrapped like ordinary text.
+    Escapes around a notation are kept.
+    """
+    pieces = [
+        (bare, width(bare, aw)) if w > room and (bare := strip_ruby(cl)) != cl else (cl, w)
+        for cl, w in _pieces(text, aw, True, ruby_width)
+    ]
+    total = sum(w for _, w in pieces)
+    while total - hang > room:
+        idx = [i for i, (cl, _) in enumerate(pieces) if "《" in cl and _RUBY_RE.search(cl)]
+        if not idx:
+            break
+        i = max(idx, key=lambda k: pieces[k][1])
+        bare = strip_ruby(pieces[i][0])
+        bw = width(bare, aw)
+        total += bw - pieces[i][1]
+        pieces[i] = (bare, bw)
+    return "".join(cl for cl, _ in pieces)
 
 
 def _unruby_wide(
@@ -1229,10 +1271,11 @@ def _unruby_wide(
     rules: KinsokuRules,
     ruby_width: str,
 ) -> list[_Unit]:
-    """Make ruby notations that fit on no line breakable (#51).
+    """Make ruby notations that fit on no line breakable (#51, #63).
 
-    A ruby notation wider than ``limit`` (the widest line) cannot be kept
-    whole without overflowing, so with ``break_long_words=True`` its ruby is
+    A ruby notation wider than ``limit`` (the widest line), or a kinsoku
+    block with ruby that is (``「鬼《おに》」``), cannot be kept whole
+    without overflowing, so with ``break_long_words=True`` its ruby is
     dropped and the base text is wrapped like ordinary text.  Ruby cannot be
     re-attached to parts of the base: which reading belongs to which base
     character is unknown (``｜魔法少女《マジカルガール》``).
@@ -1242,7 +1285,7 @@ def _unruby_wide(
         if u.space or u.width - u.hang <= limit or "《" not in u.text:
             out.append(u)
             continue
-        text = _strip_wide_ruby(u.text, limit, aw, ruby_width)
+        text = _strip_ruby_to_fit(u.text, limit, u.hang, aw, ruby_width)
         if text == u.text:
             out.append(u)
             continue
@@ -1340,7 +1383,7 @@ def _wrap_line(
             # the next one.  If it does not fit there, drop its ruby (#51).
             room = limit() if lead or not cur else rest_width
             if u.width - u.hang > room:
-                text = _strip_wide_ruby(u.text, room, ambiguous_width, ruby_width)
+                text = _strip_ruby_to_fit(u.text, room, u.hang, ambiguous_width, ruby_width)
                 if text != u.text:
                     atoms = _atoms(text, ambiguous_width, keep_all, rules, True, ruby_width)
                     units[i:i] = _glue(atoms, hanging, ambiguous_width, rules)
@@ -1435,8 +1478,10 @@ def wrap(
     :param subsequent_indent: prepended to the other lines.
     :param hanging: allow ``、。,.`` to hang past the margin (ぶら下げ).
     :param break_long_words: hard-split units wider than ``width``.  With
-        ``ruby=True``, a ruby notation wider than every line loses its ruby
-        and its base text is wrapped like ordinary text (#51).
+        ``ruby=True``, a ruby notation that does not fit on its line, even
+        with the punctuation and brackets kinsoku glues to it
+        (``「鬼《おに》」``), loses its ruby and its base text is wrapped like
+        ordinary text (#51, #63).
     :param keep_all: only break at spaces, like CSS ``word-break: keep-all``
         (natural for Korean).
     :param max_lines: keep at most this many lines; if text is cut, the last
@@ -1456,9 +1501,10 @@ def wrap(
         the next one, after the indent, so every line stands on its own.
     :param ruby: recognize ruby notation (``｜漢字《かんじ》`` / ``漢字《かんじ》``,
         青空文庫・なろう形式). The base text and its ruby form one unbreakable
-        unit; kinsoku still applies around it.  A unit wider than every line
-        is reduced to its base text when ``break_long_words=True``, and
-        overflows when it is ``False``.
+        unit; kinsoku still applies around it.  A unit that does not fit on
+        its line together with the punctuation glued to it is reduced to its
+        base text when ``break_long_words=True``, and overflows (kinsoku
+        wins) when it is ``False``.
     :param ruby_width: how a ruby unit is measured when ``ruby=True``:
         ``"full"`` (default) counts the notation as displayed, including
         ``｜《》`` and the annotation; ``"base"`` counts only the base text
