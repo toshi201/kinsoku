@@ -16,8 +16,8 @@ def test_english_lines_join_with_one_space():
 
 
 @pytest.mark.parametrize("text,expected", [
-    ("日本語の\nPython", "日本語の Python"),
-    ("Python\nを使う", "Python を使う"),
+    ("日本語の\nPython", "日本語のPython"),     # #49: no space by default
+    ("Python\nを使う", "Pythonを使う"),
     ("使う。\nThen", "使う。Then"),
     ("「\nabc」", "「abc」"),
     ("abc\n」です", "abc」です"),

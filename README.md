@@ -88,7 +88,20 @@ kinsoku a.txt - b.txt                # - は標準入力。ファイルごとに
 ```
 
 `-w` を省略すると環境変数 `COLUMNS` → 端末幅 → 80 の順で幅を決めます。
-`--truncate` と `--width-of` は同時に指定できず、折り返し専用のオプション（`-n` `--hanging` など）と組み合わせるとエラーになります。
+`--truncate` `--width-of` `--tategaki` `--table` `--unwrap` `--rewrap` は同時に指定できません。
+そのモードで使えないオプションを指定すると、`kinsoku: error: --ruby cannot be used with --table` のようにエラー（終了コード 2）になります（既定値のままなら指定していない扱い）。
+
+| モード | 使えるオプション |
+| --- | --- |
+| 通常の折り返し | `-w` `--hanging` `--no-break-long-words` `--keep-all` `-i` `-s` `-n` `--placeholder` `--ambiguous-width` `--rules` `--ansi-reflow` `--ruby` `--ruby-width` `--tabsize` |
+| `--truncate` | `-w` `--placeholder` `--ambiguous-width` `--tabsize` |
+| `--width-of` | `--ambiguous-width` `--tabsize` |
+| `--tategaki` | `--gap` `--ruby`（ルビを取り除いて縦書きにする） |
+| `--table` | `-w` `--hanging` `--no-break-long-words` `--keep-all` `--ambiguous-width` `--rules` `--delimiter` `--no-header` `--style` |
+| `--unwrap` | `--indent-marks-paragraph` `--cjk-latin-space` |
+| `--rewrap` | 通常の折り返しのオプション（`--ruby` `--ruby-width` を含む）と `--indent-marks-paragraph` `--cjk-latin-space` |
+
+`--encoding` はどのモードでも使えます。UTF-8（既定）で読むときは、ファイル・標準入力それぞれの先頭の BOM（Excel の「CSV UTF-8」など）を取り除きます。
 
 ## textwrap からの移行
 
@@ -150,7 +163,7 @@ print(kinsoku.tategaki("令和8年12月25日", 5, halfwidth="pair"))   # 縦中�
 - 半角英数字は `halfwidth="fullwidth"`（既定）で全角に変換して1マスに1文字、`halfwidth="pair"` で2文字ずつ1マスに入れます（縦中横）
 - 禁則：`。」ャ` などは列頭に、`「（` などは列末に来ないよう前後の文字を次の列へ追い出します。`hanging=True`（既定）では `、。，．` を列の下に1マスぶら下げ、そのときは全列が `height + 1` 行になります
 - 結合文字・ゼロ幅文字は直前のマスに付け、ANSI エスケープ（色）は取り除きます
-- CLI: `kinsoku --tategaki 10 [--gap 2] novel.txt`
+- CLI: `kinsoku --tategaki 10 [--gap 2] novel.txt`。ルビ記法には対応していないので、青空文庫のテキストなどは `--ruby` を付けるとルビを取り除いて（`strip_ruby`）縦書きにします
 
 ### 言語別の禁則ルール
 
@@ -210,6 +223,10 @@ kinsoku.unwrap("吾輩は猫で\nある。名前\nはまだ無い。")
 # => '吾輩は猫である。名前はまだ無い。'
 kinsoku.unwrap("The quick\nbrown fox\n\nwell-\nknown")
 # => 'The quick brown fox\n\nwell-known'
+kinsoku.unwrap("日本語と\nEnglish\nの混在")
+# => '日本語とEnglishの混在'
+kinsoku.unwrap("日本語と\nEnglish\nの混在", cjk_latin_space=True)
+# => '日本語と English の混在'
 kinsoku.unwrap("\u3000一段落目の\n文です。\n\u3000二段落目\nです。", indent_marks_paragraph=True)
 # => '\u3000一段落目の文です。\n\u3000二段落目です。'
 kinsoku.rewrap("吾輩は猫で\nある。名前\nはまだ無い。", 8)
@@ -217,7 +234,9 @@ kinsoku.rewrap("吾輩は猫で\nある。名前\nはまだ無い。", 8)
 ```
 
 - 空行（空白だけの行を含む）は段落の区切りとしてそのまま残します
-- 改行の前後がどちらも全角（CJK）か、どちらかが `。」（` などの全角約物ならスペースなしで、それ以外はスペース1つで連結します
+- 改行の前後がどちらも全角（CJK）か、どちらかが `。」（` などの全角約物ならスペースなしで連結します
+- 改行の前後の片方が全角（CJK。ハングルを除く）で、もう片方が英数字のときもスペースなしで連結します（`Python\nを使う` → `Pythonを使う`）。日本語では和文と英数字の間にスペースを入れない書き方が多いため、`fill` → `unwrap` で元の文に戻ります。スペースを入れたいときは `cjk_latin_space=True`（CLI では `--cjk-latin-space`）
+- 英文どうし（両側とも英数字）や、ハングルと英数字の境目はスペース1つで連結します
 - 行末が「英字＋`-`」のときはハイフンを残したままスペースなしで連結します（`well-\nknown` → `well-known`）。本物のハイフンと区別できないため、ハイフンを削除することはしません
 - `- ` `* ` `・` `1. ` などで始まる箇条書きらしい行は、常に新しい段落とみなします
 - `indent_marks_paragraph=True` で、全角スペースや半角スペースで字下げされた行を段落の始まりとみなします（字下げは保持）
@@ -228,6 +247,7 @@ kinsoku.rewrap("吾輩は猫で\nある。名前\nはまだ無い。", 8)
 pbpaste | kinsoku --unwrap
 kinsoku --rewrap -w 40 mail.txt
 kinsoku --rewrap -w 40 --indent-marks-paragraph novel.txt
+kinsoku --unwrap --cjk-latin-space mail.txt   # 和文と英数字の境目にスペースを入れる
 ```
 
 ### 表を整形する（table）
@@ -272,7 +292,7 @@ print(kinsoku.table(rows, ["都市", "説明", "人口(万)"], width=36,
 
 - セルは `str()` で文字列にし、`None` は空欄になります。セル内の改行はそのまま複数行になります
 - 行ごとに列数が違う場合は、足りないセルを空欄で補います
-- ANSI の色付きセルも幅0として揃えます。折り返したセルは行ごとに色をリセットし、罫線に色がにじみません
+- ANSI の色付きセルも幅0として揃えます。折り返したセルは行ごとに色と OSC 8 ハイパーリンクを閉じて次の行で開き直すので、隣のセルや罫線に色やリンクがにじみません
 - `markdown` では `|` をエスケープし、複数行のセルを `<br>` でつなぎます（`width` を指定しても各行の幅は揃いません）
 - その他のキーワード引数（`hanging`、`keep_all` など）は `kinsoku.wrap` に渡されます
 
@@ -350,7 +370,8 @@ applies Japanese line-breaking rules:
 - `ansi_reflow=True` closes active colors / OSC 8 links at each line end and
   reopens them on the next line (also `ansi_reflow(lines)`, CLI `--ansi-reflow`)
 - `unwrap()` joins hard-wrapped lines back into paragraphs (no space between CJK
-  characters, one space for latin text, blank lines kept); `rewrap(text, width)`
+  characters, nor between CJK and latin/digits unless `cjk_latin_space=True`;
+  one space for latin text; blank lines kept); `rewrap(text, width)`
   unwraps and wraps again. CLI: `--unwrap`, `--rewrap`
 - `table(rows, headers)` renders aligned tables (styles `simple`, `grid`, `markdown`, `plain`) with kinsoku wrapping inside cells, a `width` budget, per-column `align` and ANSI-safe cells; `kinsoku --table` formats CSV/TSV input
 - `ruby=True` keeps ruby notation (`｜漢字《かんじ》`, `漢字《かんじ》`) unbroken;
@@ -360,6 +381,7 @@ API: `width`, `char_width`, `strip_ansi`, `wrap`, `fill`, `shorten`, `truncate`,
 `KinsokuWrapper`, `dedent`, `indent`, `tategaki`, `KinsokuRules`, `PRESETS`, `ansi_reflow`, `unwrap`, `rewrap`, `table`,
 `strip_ruby`, `ruby_to_html`.
 CLI: `kinsoku -w N [FILE...]` (`-` = stdin; width defaults to `$COLUMNS`/terminal/80;
-`--encoding cp932` for Shift_JIS input; `--placeholder` for `--truncate` / `-n`).
+`--encoding cp932` for Shift_JIS input, a UTF-8 BOM is dropped; `--placeholder` for `--truncate` / `-n`;
+options a mode does not use are errors, `--tategaki --ruby` strips ruby).
 
 License: MIT
