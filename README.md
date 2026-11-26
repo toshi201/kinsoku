@@ -42,9 +42,8 @@ kinsoku.wrap("あいう。えお", 6, hanging=True)  # => ['あいう。', 'え�
 kinsoku.fill(text, 40)  # 改行で結合した文字列
 kinsoku.truncate("あいうえお", 6)  # => 'あい…'
 kinsoku.pad("名前", 8, "center")  # => '  名前  '  表の整形に
-kinsoku.pad(
-    kinsoku.truncate("あいうえお", 6), 6
-)  # => 'あい… '  pad は切り詰めないので、幅をそろえるなら truncate と組み合わせる
+# pad は切り詰めないので、幅をそろえるなら truncate と組み合わせる
+kinsoku.pad(kinsoku.truncate("あいうえお", 6), 6)  # => 'あい… '
 
 # 段落頭の字下げ、行数制限
 kinsoku.wrap("あいうえお\nかきく", 6, initial_indent="\u3000")
@@ -267,11 +266,8 @@ rows = [
     ["大阪", "「天下の台所」と呼ばれた商業の街。", 275],
     ["NYC", "New York City", 830],
 ]
-print(
-    kinsoku.table(
-        rows, ["都市", "説明", "人口(万)"], width=36, style="grid", align=["left", "left", "right"]
-    )
-)
+headers = ["都市", "説明", "人口(万)"]
+print(kinsoku.table(rows, headers, width=36, style="grid", align=["left", "left", "right"]))
 ```
 
 ```
