@@ -353,16 +353,50 @@ def _char_width(ch: str, ambiguous_width: int) -> int:
     return 1
 
 
-def width(text: str, ambiguous_width: int = 1) -> int:
+def width(text: str, ambiguous_width: int = 1, *, tabsize: int = 8) -> int:
     """Return the display width of ``text`` in terminal columns.
 
-    ANSI escape sequences are ignored.
+    ANSI escape sequences are ignored. A tab advances to the next multiple
+    of ``tabsize`` columns (counted by display width from the start of the
+    line, wide characters as 2), so the result is the width of ``text``
+    with its tabs expanded the way :func:`wrap` expands them.  Line breaks
+    reset the tab column and count as zero width.
     """
+    if "\t" in text:
+        text = _expand_tabs(text, tabsize, ambiguous_width)
     if "\x1b" in text:
         text = strip_ansi(text)
     if text.isascii() and text.isprintable():
         return len(text)
     return sum(map(_char_width, text, repeat(ambiguous_width)))
+
+
+_TAB_SPLIT_RE = re.compile(r"(\t|\r\n|\n|\r)")
+
+
+def _expand_tabs(text: str, tabsize: int, ambiguous_width: int) -> str:
+    """``str.expandtabs`` that counts columns by display width.
+
+    Wide characters count as two columns and ANSI escapes as none, so a tab
+    after ``"日本"`` (4 columns) advances to column 8.  ``tabsize <= 0``
+    removes tabs, like :meth:`str.expandtabs`.
+    """
+    if "\t" not in text:
+        return text
+    out: List[str] = []
+    col = 0
+    for part in _TAB_SPLIT_RE.split(text):
+        if part == "\t":
+            n = tabsize - col % tabsize if tabsize > 0 else 0
+            out.append(" " * n)
+            col += n
+        elif part in ("\r\n", "\n", "\r"):
+            out.append(part)
+            col = 0
+        elif part:
+            out.append(part)
+            col += width(part, ambiguous_width)
+    return "".join(out)
 
 
 def _clusters(text: str) -> Iterator[str]:
@@ -669,7 +703,6 @@ def _wrap_line(
     keep_all: bool,
     ambiguous_width: int,
     rules: KinsokuRules = _JA,
-    keep_escapes: bool = False,
     ruby: bool = False,
     ruby_width: str = "full",
 ) -> List[str]:
@@ -682,13 +715,15 @@ def _wrap_line(
     lines: List[str] = []
     cur: List[_Unit] = []
     cur_w = 0
-    pending = ""  # escapes of dropped leading spaces (keep_escapes only)
+    pending = ""  # escapes of dropped spaces at the start of a line
+    lead = True  # cur holds only the paragraph's leading whitespace (#21)
 
     def limit() -> int:
         return rest_width if lines else first_width
 
     def escapes(t: str) -> str:
-        return "".join(_ANSI_RE.findall(t)) if keep_escapes and "\x1b" in t else ""
+        # Whitespace dropped at a break keeps its escapes (#16).
+        return "".join(_ANSI_RE.findall(t)) if "\x1b" in t else ""
 
     def flush() -> None:
         nonlocal cur, cur_w
@@ -698,9 +733,15 @@ def _wrap_line(
         lines.append("".join(u.text for u in cur) + dropped)
         cur, cur_w = [], 0
 
+    def drop_lead() -> None:
+        # The leading whitespace leaves no room: drop it, keep its escapes.
+        nonlocal cur, cur_w, pending
+        pending = "".join(escapes(x.text) for x in cur) + pending
+        cur, cur_w = [], 0
+
     for u in units:
         if u.space:
-            if cur:
+            if cur or lead:
                 cur.append(u)
                 cur_w += u.width
             else:
@@ -712,7 +753,35 @@ def _wrap_line(
         if cur_w + u.width - u.hang <= limit():
             cur.append(u)
             cur_w += u.width
+            lead = False
             continue
+        if lead:
+            lead = False
+            avail = limit() - cur_w
+            if cur and break_long_words and u.width - u.hang > limit() and avail >= 1:
+                # an over-long word after the indent: split it into the rest
+                pieces = _split_long(
+                    u, avail, ambiguous_width, rules, ruby, ruby_width
+                )
+                if len(pieces) >= 2 and pieces[0].width <= avail:
+                    cur.append(pieces[0])
+                    flush()
+                    u = _Unit(
+                        "".join(x.text for x in pieces[1:]),
+                        sum(x.width for x in pieces[1:]),
+                        hang=u.hang,
+                    )
+                else:
+                    drop_lead()
+            else:
+                drop_lead()
+            if pending:
+                u = _Unit(pending + u.text, u.width, hang=u.hang)
+                pending = ""
+            if not lines and cur_w + u.width - u.hang <= limit():
+                cur = [u]
+                cur_w = u.width
+                continue
         if cur:
             flush()
         if break_long_words:
@@ -753,6 +822,7 @@ def wrap(
     ansi_reflow: bool = False,
     ruby: bool = False,
     ruby_width: str = "full",
+    tabsize: int = 8,
 ) -> List[str]:
     """Wrap ``text`` so every line fits in ``width`` terminal columns.
 
@@ -785,6 +855,18 @@ def wrap(
         ``"full"`` (default) counts the notation as displayed, including
         ``｜《》`` and the annotation; ``"base"`` counts only the base text
         (for output that is later rendered as real ruby).
+    :param tabsize: tabs are expanded to spaces before wrapping, up to the
+        next multiple of ``tabsize`` columns counted by display width from
+        the start of each paragraph (wide characters count as 2; the indent
+        is not counted).  :class:`KinsokuWrapper` expands tabs itself when
+        ``expand_tabs=True`` (its default), with its own ``tabsize``; with
+        ``expand_tabs=False`` any remaining tabs are expanded here with
+        ``tabsize=8``.
+
+    Whitespace at the start of a paragraph (e.g. a U+3000 字下げ or a code
+    indent) is kept on its first line; it is dropped only when not even the
+    first word fits after it.  Whitespace at a line break is dropped, but
+    ANSI escapes attached to it stay at the end of the previous line.
     """
     rules = _resolve_rules(rules)
     if width < 1:
@@ -803,11 +885,16 @@ def wrap(
     # (indent, body) pairs; the indent stays outside any re-opened styling
     pairs: List[tuple] = []
     for line in text.splitlines() or [""]:
+        if "\t" in line:
+            line = _expand_tabs(line, tabsize, ambiguous_width)
         wrapped = _wrap_line(
             line, width - iw, width - sw, hanging, break_long_words, keep_all,
-            ambiguous_width, rules, ansi_reflow, ruby, ruby_width,
+            ambiguous_width, rules, ruby, ruby_width,
         )
-        pairs.append((initial_indent if wrapped[0] else "", wrapped[0]))
+        # an escape-only line is visually empty, like "": no indent (#34)
+        first = wrapped[0]
+        visible = strip_ansi(first) if "\x1b" in first else first
+        pairs.append((initial_indent if visible else "", first))
         pairs.extend((subsequent_indent, l) for l in wrapped[1:])
 
     cut = max_lines is not None and len(pairs) > max_lines
