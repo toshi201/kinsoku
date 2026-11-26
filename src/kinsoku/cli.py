@@ -60,6 +60,7 @@ _OPTIONS = (
     ("--tabsize", "tabsize", 8),
     ("--gap", "gap", None),
     ("--indent-marks-paragraph", "indent_marks_paragraph", False),
+    ("--cjk-latin-space", "cjk_latin_space", False),
     ("--delimiter", "delimiter", None),
     ("--no-header", "no_header", False),
     ("--style", "style", "simple"),
@@ -84,8 +85,10 @@ _MODE_OPTIONS = {
         "width", "hanging", "no_break_long_words", "keep_all",
         "ambiguous_width", "rules", "delimiter", "no_header", "style",
     }),
-    "--unwrap": frozenset({"indent_marks_paragraph"}),
-    "--rewrap": _WRAP_OPTS | {"ruby", "ruby_width", "indent_marks_paragraph"},
+    "--unwrap": frozenset({"indent_marks_paragraph", "cjk_latin_space"}),
+    "--rewrap": _WRAP_OPTS | {
+        "ruby", "ruby_width", "indent_marks_paragraph", "cjk_latin_space",
+    },
 }
 
 

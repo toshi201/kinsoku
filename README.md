@@ -98,8 +98,8 @@ kinsoku a.txt - b.txt                # - は標準入力。ファイルごとに
 | `--width-of` | `--ambiguous-width` `--tabsize` |
 | `--tategaki` | `--gap` `--ruby`（ルビを取り除いて縦書きにする） |
 | `--table` | `-w` `--hanging` `--no-break-long-words` `--keep-all` `--ambiguous-width` `--rules` `--delimiter` `--no-header` `--style` |
-| `--unwrap` | `--indent-marks-paragraph` |
-| `--rewrap` | 通常の折り返しのオプション（`--ruby` `--ruby-width` を含む）と `--indent-marks-paragraph` |
+| `--unwrap` | `--indent-marks-paragraph` `--cjk-latin-space` |
+| `--rewrap` | 通常の折り返しのオプション（`--ruby` `--ruby-width` を含む）と `--indent-marks-paragraph` `--cjk-latin-space` |
 
 `--encoding` はどのモードでも使えます。UTF-8（既定）で読むときは、ファイル・標準入力それぞれの先頭の BOM（Excel の「CSV UTF-8」など）を取り除きます。
 

@@ -1,6 +1,7 @@
 """CLI: which options each mode accepts (#47) and BOM handling (#48)."""
 
 import io
+import re
 
 import pytest
 
@@ -36,6 +37,7 @@ OPTION_ARGV = {
     "tabsize": ["--tabsize", "4"],
     "gap": ["--gap", "2"],
     "indent_marks_paragraph": ["--indent-marks-paragraph"],
+    "cjk_latin_space": ["--cjk-latin-space"],
     "delimiter": ["--delimiter", ","],
     "no_header": ["--no-header"],
     "style": ["--style", "grid"],
@@ -62,6 +64,22 @@ def run_err(argv, capsys):
 def test_option_table_covers_every_option():
     assert set(OPTION_ARGV) == set(FLAG)
     assert set(MODES) == set(_MODE_OPTIONS)
+
+
+# accepted in every mode, or select the mode themselves
+NOT_MODE_DEPENDENT = {
+    "--help", "--version", "--encoding",
+    "--truncate", "--width-of", "--tategaki", "--table", "--unwrap", "--rewrap",
+}
+
+
+def test_every_cli_option_is_classified(capsys):
+    # a new option must be added to _OPTIONS (and _MODE_OPTIONS), so that
+    # using it with the wrong mode is an error rather than silently ignored
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    flags = set(re.findall(r"(?<![\w-])--[a-z][a-z-]*", capsys.readouterr().out))
+    assert flags - NOT_MODE_DEPENDENT == set(FLAG.values())
 
 
 # --- #47: rejected combinations ----------------------------------------------
@@ -219,3 +237,25 @@ def test_rewrap_ruby_width_is_passed(capsys, monkeypatch):
     out = main_out(["--rewrap", "-w", "12", "--ruby", "--ruby-width", "base"],
                    RUBY_TEXT, capsys, monkeypatch)
     assert out == kinsoku.rewrap(RUBY_TEXT, 12, ruby=True, ruby_width="base")
+
+
+# --- #54: --cjk-latin-space only with --unwrap / --rewrap ---------------------
+
+@pytest.mark.parametrize("mode", ["", "--truncate", "--width-of", "--tategaki", "--table"],
+                         ids=lambda m: m or "wrap")
+def test_cjk_latin_space_rejected_elsewhere(mode, capsys, monkeypatch):
+    set_stdin(monkeypatch, "あいう\n".encode())
+    code, out, err = run_err([*MODES[mode], "--cjk-latin-space"], capsys)
+    assert code == 2 and out == ""
+    if mode:
+        assert f"--cjk-latin-space cannot be used with {mode}" in err
+    else:
+        assert "--cjk-latin-space requires --unwrap or --rewrap" in err
+
+
+@pytest.mark.parametrize("mode", ["--unwrap", "--rewrap"])
+def test_cjk_latin_space_is_used(mode, capsys, monkeypatch):
+    text = "日本語と\nEnglish\nの混在\n"
+    assert main_out([mode, "--cjk-latin-space"], text, capsys, monkeypatch) \
+        == "日本語と English の混在\n"
+    assert main_out([mode], text, capsys, monkeypatch) == "日本語とEnglishの混在\n"
