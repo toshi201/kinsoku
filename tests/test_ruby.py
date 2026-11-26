@@ -19,15 +19,34 @@ UNITS = ["｜東京駅《とうきょうえき》", "漢字《かんじ》"]
 # below 4 columns even plain "た。" cannot be kept together
 @pytest.mark.parametrize("w", range(4, 40))
 def test_ruby_never_split(mode, w):
-    lines = wrap(TEXT, w, ruby=True, ruby_width=mode)
+    # break_long_words=False: a ruby unit is never split; only a lone
+    # over-wide one may overflow
+    lines = wrap(TEXT, w, ruby=True, ruby_width=mode, break_long_words=False)
     assert "".join(lines) == TEXT
     for unit in UNITS:
         assert any(unit in line for line in lines), (unit, lines)
     for line in lines:
         assert line[0] not in NO_START, lines
-        # only a lone over-wide ruby unit may overflow
         if ruby_width(line, mode) > w:
             assert any(line.startswith(u) for u in UNITS), lines
+
+
+@pytest.mark.parametrize("mode", ["base", "full"])
+@pytest.mark.parametrize("w", range(4, 40))
+def test_ruby_kept_when_it_fits(mode, w):
+    # break_long_words=True (default): a ruby unit that fits on a line is
+    # kept whole; a wider one loses its ruby, and no line overflows (#51)
+    lines = wrap(TEXT, w, ruby=True, ruby_width=mode)
+    joined = "".join(lines)
+    for unit in UNITS:
+        if ruby_width(unit, mode) <= w:
+            assert any(unit in line for line in lines), (unit, lines)
+        else:
+            assert unit not in joined
+    assert strip_ruby(joined) == strip_ruby(TEXT)
+    for line in lines:
+        assert line[0] not in NO_START, lines
+        assert ruby_width(line, mode) <= w, lines
 
 
 def test_default_is_off():
@@ -154,7 +173,7 @@ def test_cli_ruby(tmp_path, capsys):
     f.write_text("あいう漢字《かんじ》", encoding="utf-8")
     main(["-w", "8", str(f)])
     assert "漢字《かんじ》" not in capsys.readouterr().out.splitlines()
-    main(["-w", "8", "--ruby", str(f)])
+    main(["-w", "14", "--ruby", str(f)])
     assert capsys.readouterr().out == "あいう\n漢字《かんじ》\n"
     main(["-w", "10", "--ruby", "--ruby-width", "base", str(f)])
     assert capsys.readouterr().out == "あいう漢字《かんじ》\n"
@@ -164,12 +183,12 @@ def test_escape_before_ruby_unit_moves_with_it():
     # regression: the escape used to be left at the end of the previous line
     from kinsoku import wrap
 
-    assert wrap("あ\x1b[31m漢字《かんじ》\x1b[0mい", 8, ruby=True) == [
+    assert wrap("あ\x1b[31m漢字《かんじ》\x1b[0mい", 14, ruby=True) == [
         "あ",
         "\x1b[31m漢字《かんじ》\x1b[0m",
         "い",
     ]
-    assert wrap("い\x1b[1m｜漢字《かんじ》\x1b[0m", 8, ruby=True) == [
+    assert wrap("い\x1b[1m｜漢字《かんじ》\x1b[0m", 16, ruby=True) == [
         "い",
         "\x1b[1m｜漢字《かんじ》\x1b[0m",
     ]
@@ -178,7 +197,7 @@ def test_escape_before_ruby_unit_moves_with_it():
 def test_ruby_with_ansi_reflow_and_rules():
     from kinsoku import wrap
 
-    out = wrap("\x1b[31mあ漢字《かんじ》い\x1b[0m", 8, ruby=True, ansi_reflow=True)
+    out = wrap("\x1b[31mあ漢字《かんじ》い\x1b[0m", 14, ruby=True, ansi_reflow=True)
     assert out == ["\x1b[31mあ\x1b[0m", "\x1b[31m漢字《かんじ》\x1b[0m", "\x1b[31mい\x1b[0m"]
     assert wrap("漢字《かんじ》ッう", 14, ruby=True) == ["漢字《かんじ》ッ", "う"]
     assert wrap("漢字《かんじ》ッう", 14, ruby=True, rules="loose") == [
@@ -190,9 +209,9 @@ def test_ruby_with_ansi_reflow_and_rules():
 def test_kinsoku_wrapper_passes_ruby_through_extra():
     from kinsoku import KinsokuWrapper
 
-    w = KinsokuWrapper(8, ruby=True)
+    w = KinsokuWrapper(14, ruby=True)
     assert w.wrap("あ漢字《かんじ》い") == ["あ", "漢字《かんじ》", "い"]
-    assert KinsokuWrapper(8, ruby=True, ruby_width="base").wrap(
+    assert KinsokuWrapper(14, ruby=True, ruby_width="base").wrap(
         "あ漢字《かんじ》い"
     ) == ["あ漢字《かんじ》い"]
-    assert KinsokuWrapper(8).wrap("あ漢字《かんじ》い") != w.wrap("あ漢字《かんじ》い")
+    assert KinsokuWrapper(14).wrap("あ漢字《かんじ》い") != w.wrap("あ漢字《かんじ》い")
