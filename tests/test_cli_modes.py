@@ -197,3 +197,25 @@ def test_other_encoding_is_respected(tmp_path, capsys):
     g.write_bytes(BOM + "a\n".encode())
     assert main(["--encoding", "latin-1", "--unwrap", str(g)]) == 0
     assert capsys.readouterr().out == "ï»¿a\n"
+
+
+# --- review of #53: --rewrap accepts --ruby / --ruby-width --------------------
+
+RUBY_TEXT = " ｜吾輩《わがはい》は猫である。名前は\nまだ無い。どこで生れたかとんと\n見当がつかぬ。\n"
+
+
+def test_rewrap_ruby_keeps_annotations_whole(capsys, monkeypatch):
+    import kinsoku
+    out = main_out(["--rewrap", "-w", "12", "--ruby"], RUBY_TEXT, capsys, monkeypatch)
+    assert out.splitlines()[0] == " ｜吾輩《わがはい》"
+    assert out == kinsoku.rewrap(RUBY_TEXT, 12, ruby=True)
+    # without --ruby the annotation is split mid-way
+    plain = main_out(["--rewrap", "-w", "12"], RUBY_TEXT, capsys, monkeypatch)
+    assert "《わがはい》" not in plain
+
+
+def test_rewrap_ruby_width_is_passed(capsys, monkeypatch):
+    import kinsoku
+    out = main_out(["--rewrap", "-w", "12", "--ruby", "--ruby-width", "base"],
+                   RUBY_TEXT, capsys, monkeypatch)
+    assert out == kinsoku.rewrap(RUBY_TEXT, 12, ruby=True, ruby_width="base")

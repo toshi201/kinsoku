@@ -85,7 +85,7 @@ _MODE_OPTIONS = {
         "ambiguous_width", "rules", "delimiter", "no_header", "style",
     }),
     "--unwrap": frozenset({"indent_marks_paragraph"}),
-    "--rewrap": _WRAP_OPTS | {"indent_marks_paragraph"},
+    "--rewrap": _WRAP_OPTS | {"ruby", "ruby_width", "indent_marks_paragraph"},
 }
 
 
@@ -253,6 +253,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 rules=args.rules,
                 ansi_reflow=args.ansi_reflow,
                 tabsize=args.tabsize,
+                ruby=args.ruby,
+                ruby_width=args.ruby_width,
             )
         except ValueError as e:
             p.error(str(e))
