@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any, Iterable, List, Optional, Sequence, Union
 
-from ._core import _check_align, _check_ambiguous_width, _check_width, pad, wrap
+from ._core import (
+    _check_align,
+    _check_ambiguous_width,
+    _check_width,
+    ansi_reflow,
+    pad,
+    wrap,
+)
 from ._core import width as _w
 
 __all__ = ["table", "STYLES"]
 
 STYLES = ("simple", "grid", "markdown", "plain")
 _MIN_SHRINK = 4
-
-_SGR = re.compile(r"\x1b\[[0-9;:]*m")
-_RESET = "\x1b[0m"
 
 # Box drawing characters are East Asian Ambiguous: with ambiguous_width=2
 # they would be drawn two columns wide, so we fall back to ASCII.
@@ -48,24 +51,6 @@ def _per_column(name: str, value: Any, ncols: int, default: Any) -> List[Any]:
     return items + [default] * (ncols - len(items))
 
 
-def _close_ansi(lines: List[str]) -> List[str]:
-    """Make every line of a multi-line cell self-contained w.r.t. SGR colors.
-
-    Active color codes are reset at the end of a line (so they never bleed
-    into padding or borders) and re-applied at the start of the next one.
-    """
-    out: List[str] = []
-    active = ""
-    for line in lines:
-        prefix = active
-        for m in _SGR.finditer(line):
-            code = m.group()
-            active = "" if code in (_RESET, "\x1b[m") else active + code
-        line = prefix + line
-        out.append(line + _RESET if active else line)
-    return out
-
-
 def _cell_lines(text: str, limit: Optional[int], aw: int, wrap_kwargs: dict) -> List[str]:
     lines: List[str] = []
     for line in text.splitlines() or [""]:
@@ -74,7 +59,9 @@ def _cell_lines(text: str, limit: Optional[int], aw: int, wrap_kwargs: dict) -> 
         else:
             lines.append(line)
     if "\x1b" in text:
-        lines = _close_ansi(lines)
+        # close SGR / OSC 8 state at each line end and re-open it on the next
+        # line, so styling and links never bleed into padding or borders
+        lines = ansi_reflow(lines)
     return lines
 
 
