@@ -92,6 +92,7 @@ kinsoku a.txt - b.txt                # - は標準入力。ファイルごとに
 `-w` を省略すると環境変数 `COLUMNS` → 端末幅 → 80 の順で幅を決めます。
 `--truncate` `--width-of` `--tategaki` `--table` `--unwrap` `--rewrap` は同時に指定できません。
 そのモードで使えないオプションを指定すると、`kinsoku: error: --ruby cannot be used with --table` のようにエラー（終了コード 2）になります（既定値のままなら指定していない扱い）。
+`kinsoku ... | head` のように出力先が先に閉じたときは、何も表示せずに終了コード 141 で終わります。Ctrl-C で中断したときは終了コード 130 です。出力の文字コード（Windows のコンソールの cp932 など）で表せない文字があると、`kinsoku: error: cannot encode output as cp932 (try PYTHONIOENCODING=utf-8)` と表示して終了コード 1 で終わります。
 
 | モード | 使えるオプション |
 | --- | --- |
@@ -305,10 +306,14 @@ print(
 - `markdown` では `|` をエスケープし、複数行のセルを `<br>` でつなぎます（`width` を指定しても各行の幅は揃いません）
 - その他のキーワード引数（`hanging`、`keep_all` など）は `kinsoku.wrap` に渡されます
 
-CLI では `--table` で CSV / TSV を表にします。区切り文字は1行目にタブがあればタブ、なければカンマ（`--delimiter` で指定可）。1行目は見出しとして扱います（`--no-header` で無効）。`-w` を指定すると表全体の幅の上限になります。
+CLI では `--table` で CSV / TSV を表にします。区切り文字は1行目にタブがあればタブ、なければカンマ（`--delimiter` で指定可）。1行目は見出しとして扱います（`--no-header` で無効）。表全体の幅の上限は `-w` で指定します。`-w` を省略したときの上限は次のとおりです（上限をなくすには `-w 0` を指定します。`-w 0` は `--table` のときだけ使えます）。
+
+- `--style markdown`: 上限なし（ファイルに保存して表示する用途を想定。`-w` を明示したときだけ上限を使います）
+- それ以外のスタイル: 環境変数 `COLUMNS` が設定されていればその値、出力先が端末なら端末幅、パイプやリダイレクトのときは上限なし
 
 ```bash
 kinsoku --table --style grid -w 60 data.csv
+kinsoku --table -w 0 data.csv       # 幅の上限なし
 cat data.tsv | kinsoku --table --style markdown
 ```
 
