@@ -14,6 +14,8 @@ from itertools import repeat
 from types import MappingProxyType
 from typing import Any, Literal
 
+from . import _balance
+
 # 行頭禁則: characters that must not start a line.
 NO_START = frozenset(
     "、。，．,.!?！？‼⁇⁈⁉)）]］}｝〕〉》」』】〙〗〟’”｠»"
@@ -1447,6 +1449,77 @@ def _wrap_line(
     return lines
 
 
+def _balance_line(
+    line: str,
+    first_width: int,
+    rest_width: int,
+    hanging: bool,
+    break_long_words: bool,
+    keep_all: bool,
+    ambiguous_width: int,
+    rules: KinsokuRules = _JA,
+    ruby: bool = False,
+    ruby_width: str = "full",
+) -> list[str]:
+    """:func:`_wrap_line` with the lines balanced (``balance=True``, #76).
+
+    :func:`kinsoku._balance.balance_breaks` chooses the breaks among the
+    layouts with the fewest lines, which is the number the greedy wrapper
+    gives (it fills every line as far as it goes, with the same rule for
+    what fits).  The greedy wrapper is used instead when the paragraph has
+    more than :data:`kinsoku._balance.MAX_UNITS` units, or needs one of its
+    special cases: a unit wider than a line (hard split, ruby dropped) or
+    leading whitespace that leaves no room for the first word.
+    """
+    units = _glue(
+        _atoms(line, ambiguous_width, keep_all, rules, ruby, ruby_width),
+        hanging,
+        ambiguous_width,
+        rules,
+    )
+    first = next((k for k, u in enumerate(units) if not u.space), None)
+    room = min(first_width, rest_width)
+    breaks = None
+    if (
+        first is not None
+        and len(units) <= _balance.MAX_UNITS
+        and sum(u.width for u in units[: first + 1]) - units[first].hang <= first_width
+        and all(u.space or u.width - u.hang <= room for u in units)
+    ):
+        breaks = _balance.balance_breaks(
+            [u.width for u in units],
+            [u.hang for u in units],
+            [u.space for u in units],
+            first_width,
+            rest_width,
+        )
+    if breaks is None:
+        return _wrap_line(
+            line,
+            first_width,
+            rest_width,
+            hanging,
+            break_long_words,
+            keep_all,
+            ambiguous_width,
+            rules,
+            ruby,
+            ruby_width,
+        )
+
+    def escapes(t: str) -> str:
+        return "".join(_ANSI_RE.findall(t)) if "\x1b" in t else ""
+
+    lines: list[str] = []
+    for a, b in zip([0, *breaks], [*breaks, len(units)], strict=True):
+        seg = units[a:b]
+        dropped = ""
+        while seg and seg[-1].space:
+            dropped = escapes(seg.pop().text) + dropped
+        lines.append("".join(u.text for u in seg) + dropped)
+    return lines
+
+
 def wrap(
     text: str,
     width: int = 70,
@@ -1464,6 +1537,7 @@ def wrap(
     ruby: bool = False,
     ruby_width: str = "full",
     tabsize: int = 8,
+    balance: bool = False,
 ) -> list[str]:
     """Wrap ``text`` so every line fits in ``width`` terminal columns.
 
@@ -1516,6 +1590,19 @@ def wrap(
         ``expand_tabs=True`` (its default), with its own ``tabsize``; with
         ``expand_tabs=False`` any remaining tabs are expanded here with
         ``tabsize=8``.
+    :param balance: even out the line lengths instead of filling each line
+        greedily (#76).  Every paragraph keeps the number of lines the
+        greedy layout gives it, and the same places a line may break
+        (kinsoku, ruby, ANSI, ``hanging``, indents), but its breaks are
+        moved so that the sum of ``(room - line width) ** 2`` over all its
+        lines, the last one included, is as small as possible: no line is
+        left with a word or two.  With ``max_lines``, each paragraph is
+        balanced first and the lines are cut afterwards, so the kept lines
+        are the same as the first lines of the uncut output.  A paragraph
+        with more than 2000 units, one with a unit that does not fit on a
+        line (hard-split words, ruby dropped by ``break_long_words``), or
+        one whose leading whitespace leaves no room for its first word, is
+        wrapped greedily.
 
     A grapheme cluster is never split, so one that is wider than the room on
     a line (a wide character such as ``"あ"`` with ``width=1``) is put on a
@@ -1544,7 +1631,7 @@ def wrap(
     for line in text.splitlines() or [""]:
         if "\t" in line:
             line = _expand_tabs(line, tabsize, ambiguous_width)
-        wrapped = _wrap_line(
+        wrapped = (_balance_line if balance else _wrap_line)(
             line,
             width - iw,
             width - sw,

@@ -120,6 +120,8 @@ def main(argv=None) -> None:
     cases = [
         ("kinsoku.wrap(width=40)", lambda: kinsoku.wrap(text, 40)),
         ("kinsoku.wrap(width=80)", lambda: kinsoku.wrap(text, 80)),
+        ("kinsoku.wrap(width=40, balance)", lambda: kinsoku.wrap(text, 40, balance=True)),
+        ("kinsoku.wrap(width=80, balance)", lambda: kinsoku.wrap(text, 80, balance=True)),
         ("kinsoku.width", lambda: kinsoku.width(text)),
         ("textwrap.wrap(width=40) [ref]", tw(40)),
         ("textwrap.wrap(width=80) [ref]", tw(80)),
@@ -130,6 +132,10 @@ def main(argv=None) -> None:
         ("textwrap.wrap(long word, 76) [ref]", lambda: textwrap.wrap(long_word, 76)),
         ("kinsoku.unwrap(1 paragraph)", lambda: kinsoku.unwrap(hard)),
         ("kinsoku.rewrap(1 paragraph, 60)", lambda: kinsoku.rewrap(hard, 60)),
+        (
+            "kinsoku.rewrap(1 paragraph, 60, bal)",
+            lambda: kinsoku.rewrap(hard, 60, balance=True),
+        ),
         (
             "kinsoku.unwrap(indent_marks)",
             lambda: kinsoku.unwrap(hard, indent_marks_paragraph=True),
