@@ -50,7 +50,7 @@ def test_truncate_multiple_files_without_trailing_newline(tmp_path, capsys):
 def test_dash_reads_stdin_between_files(tmp_path, capsys, monkeypatch):
     a = tmp_path / "a.txt"
     a.write_text("one", encoding="utf-8")
-    set_stdin(monkeypatch, "two".encode())
+    set_stdin(monkeypatch, b"two")
     _, out, _ = run(["-w", "20", str(a), "-", str(a)], capsys)
     assert out == "one\ntwo\none\n"
 

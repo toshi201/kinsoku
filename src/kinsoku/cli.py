@@ -8,7 +8,6 @@ import csv
 import io
 import shutil
 import sys
-from typing import List, Optional
 
 from . import __version__
 from ._core import PRESETS, fill, strip_ruby, truncate, width
@@ -136,7 +135,7 @@ def _check_options(p: argparse.ArgumentParser, args: argparse.Namespace, mode: s
         p.error(f"{opt} requires {' or '.join(modes)}")
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="kinsoku",
         description="Wrap Japanese/CJK text by display width with kinsoku shori.",

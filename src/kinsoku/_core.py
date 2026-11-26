@@ -2,26 +2,18 @@
 
 from __future__ import annotations
 
+import dataclasses
 import html
 import re
 import unicodedata
-import dataclasses
-from dataclasses import dataclass
 from bisect import bisect_right
+from collections.abc import Iterable, Iterator, Mapping
+from dataclasses import dataclass
 from functools import lru_cache
 from itertools import repeat
 from types import MappingProxyType
 from typing import (
-    Dict,
-    FrozenSet,
-    Iterable,
-    Iterator,
-    List,
     Literal,
-    Mapping,
-    Optional,
-    Tuple,
-    Union,
 )
 
 # 行頭禁則: characters that must not start a line.
@@ -77,10 +69,10 @@ class KinsokuRules:
         rules = rules.replace(no_start=rules.no_start - {"ー"})
     """
 
-    no_start: FrozenSet[str] = frozenset()
-    no_end: FrozenSet[str] = frozenset()
-    hangable: FrozenSet[str] = frozenset()
-    quotes: FrozenSet[str] = frozenset("\"'")
+    no_start: frozenset[str] = frozenset()
+    no_end: frozenset[str] = frozenset()
+    hangable: frozenset[str] = frozenset()
+    quotes: frozenset[str] = frozenset("\"'")
 
     def __post_init__(self) -> None:
         for name in ("no_start", "no_end", "hangable", "quotes"):
@@ -89,7 +81,7 @@ class KinsokuRules:
                 object.__setattr__(self, name, frozenset(value))
 
     @classmethod
-    def preset(cls, name: str) -> "KinsokuRules":
+    def preset(cls, name: str) -> KinsokuRules:
         """Return the built-in preset called ``name`` (see :data:`PRESETS`)."""
         try:
             return PRESETS[name]
@@ -97,7 +89,7 @@ class KinsokuRules:
             valid = ", ".join(PRESETS)
             raise ValueError(f"unknown rules preset {name!r} (valid: {valid})") from None
 
-    def replace(self, **changes: Iterable[str]) -> "KinsokuRules":
+    def replace(self, **changes: Iterable[str]) -> KinsokuRules:
         """Return a copy with some fields replaced (like :func:`dataclasses.replace`)."""
         return dataclasses.replace(self, **changes)
 
@@ -139,7 +131,7 @@ PRESETS: Mapping[str, KinsokuRules] = MappingProxyType(
 
 _JA = PRESETS["ja"]
 
-RulesLike = Union[str, KinsokuRules]
+RulesLike = str | KinsokuRules
 
 
 def _resolve_rules(rules: RulesLike) -> KinsokuRules:
@@ -173,7 +165,7 @@ _LEADING_ANSI_RE = re.compile("(?:" + _ANSI_RE.pattern + ")+")
 _TRAILING_ANSI_RE = re.compile("(?:" + _ANSI_RE.pattern + r")+\Z")
 
 
-def _ruby_parts(m: "re.Match[str]") -> Tuple[str, str]:
+def _ruby_parts(m: re.Match[str]) -> tuple[str, str]:
     """(base, ruby) of a ruby-notation match."""
     if m.group("ebase") is not None:
         return m.group("ebase"), m.group("eruby")
@@ -194,7 +186,7 @@ def ruby_to_html(text: str) -> str:
     ``ruby_to_html("漢字《かんじ》")`` → ``"<ruby>漢字<rt>かんじ</rt></ruby>"``.
     All text (inside and outside ruby) is HTML-escaped.
     """
-    out: List[str] = []
+    out: list[str] = []
     pos = 0
     for m in _RUBY_RE.finditer(text):
         base, rt = _ruby_parts(m)
@@ -261,7 +253,7 @@ class _AnsiState:
 
     def __init__(self) -> None:
         self.sgr: dict = {}
-        self.link: Optional[tuple] = None  # (params, uri, terminator)
+        self.link: tuple | None = None  # (params, uri, terminator)
 
     def feed(self, seq: str) -> None:
         """Update the state with one escape sequence (others are ignored)."""
@@ -341,7 +333,7 @@ class _AnsiState:
             out += "\x1b[0m"
         return out
 
-    def copy(self) -> "_AnsiState":
+    def copy(self) -> _AnsiState:
         c = _AnsiState()
         c.sgr = dict(self.sgr)
         c.link = self.link
@@ -366,7 +358,7 @@ def _reflow_body(body: str, state: _AnsiState) -> str:
     return prefix + body + state.close()
 
 
-def ansi_reflow(lines: List[str]) -> List[str]:
+def ansi_reflow(lines: list[str]) -> list[str]:
     """Make each line self-contained with respect to ANSI styling.
 
     Lines that end with active SGR attributes (colors, bold, ...) or an open
@@ -669,7 +661,7 @@ def _expand_tabs(text: str, tabsize: int, ambiguous_width: int) -> str:
     """
     if "\t" not in text:
         return text
-    out: List[str] = []
+    out: list[str] = []
     col = 0
     for part in _TAB_SPLIT_RE.split(text):
         if part == "\t":
@@ -766,7 +758,7 @@ def _pieces(
     ambiguous_width: int,
     ruby: bool = False,
     ruby_width: str = "full",
-) -> Iterator[Tuple[str, int]]:
+) -> Iterator[tuple[str, int]]:
     """Yield ``(cluster, width)`` pairs.
 
     With ``ruby=True`` every ruby notation is yielded as one indivisible
@@ -780,7 +772,7 @@ def _pieces(
             yield cl, width(cl, ambiguous_width)
         return
     pos = 0
-    held: Optional[Tuple[str, int]] = None  # previous ruby unit
+    held: tuple[str, int] | None = None  # previous ruby unit
     for m in _RUBY_RE.finditer(text):
         seg = text[pos : m.start()]
         if held is not None:
@@ -820,7 +812,7 @@ def _base(cl: str) -> str:
     return cl[:1]
 
 
-def _last_base(word: List[str]) -> str:
+def _last_base(word: list[str]) -> str:
     """Base character of the last visible cluster of a word run."""
     for c in reversed(word):
         b = c if len(c) == 1 else _base(c)
@@ -856,7 +848,7 @@ def _atoms(
     rules: KinsokuRules = _JA,
     ruby: bool = False,
     ruby_width: str = "full",
-) -> List[_Unit]:
+) -> list[_Unit]:
     """Split text into atoms: spaces, word runs, single wide clusters.
 
     A word run is a run of narrow clusters. Punctuation such as ``.`` ``,``
@@ -871,12 +863,12 @@ def _atoms(
     A ruby notation (``ruby=True``) is one atom, or part of a latin word
     when its base text starts with a narrow character.
     """
-    atoms: List[_Unit] = []
-    word: List[str] = []  # clusters of the current word run
+    atoms: list[_Unit] = []
+    word: list[str] = []  # clusters of the current word run
     word_w = 0
     # (cluster, width) of infix punctuation after an ASCII word, kept in the
     # word only if another ASCII word character follows
-    pend: List[Tuple[str, int]] = []
+    pend: list[tuple[str, int]] = []
     append = atoms.append
     cw = _char_width
     no_start = rules.no_start
@@ -906,7 +898,7 @@ def _atoms(
     # ASCII quotes next to CJK text (#52): decide open/close up front, since
     # that needs the next character
     qs = rules.quotes - no_start - no_end
-    qdec: Optional[Iterator[Optional[bool]]] = None
+    qdec: Iterator[bool | None] | None = None
     if qs and not keep_all and any(q in text for q in qs):
         src = list(src)
         qdec = iter(_quote_kinds(src, rmode, qs, no_start, no_end))
@@ -983,12 +975,12 @@ def _atoms(
 
 
 def _quote_kinds(
-    items: List,
+    items: list,
     rmode: bool,
-    qs: FrozenSet[str],
-    no_start: FrozenSet[str],
-    no_end: FrozenSet[str],
-) -> List[Optional[bool]]:
+    qs: frozenset[str],
+    no_start: frozenset[str],
+    no_end: frozenset[str],
+) -> list[bool | None]:
     """Classify each quote in ``items`` (clusters or ruby items) for :func:`_atoms`.
 
     ``True`` is an opening quote, ``False`` a closing one and ``None`` a
@@ -1007,8 +999,8 @@ def _quote_kinds(
             bases.append(it[2])
         else:
             bases.append(it if len(it) == 1 else _base(it))
-    kinds: List[Optional[bool]] = []
-    depth: Dict[str, int] = {}
+    kinds: list[bool | None] = []
+    depth: dict[str, int] = {}
     wch = _WORD_CH
     prev = ""
     n = len(bases)
@@ -1020,7 +1012,7 @@ def _quote_kinds(
             while j < n and not bases[j]:
                 j += 1
             nxt = bases[j] if j < n else ""
-            kind: Optional[bool]
+            kind: bool | None
             if not nxt or nxt in _SPACES:
                 kind = False if prev and prev not in _SPACES else None
             elif not prev or prev in _SPACES or prev in no_end:
@@ -1045,7 +1037,7 @@ def _quote_kinds(
 
 def _ruby_items(
     text: str, ambiguous_width: int, ruby_width: str
-) -> Iterator[Tuple[str, int, str, int]]:
+) -> Iterator[tuple[str, int, str, int]]:
     """``(cluster, width, base, base_width)`` for :func:`_atoms` with ruby."""
     for cl, w in _pieces(text, ambiguous_width, True, ruby_width):
         b = _base(cl)
@@ -1056,13 +1048,13 @@ def _ruby_items(
 
 
 def _glue(
-    atoms: List[_Unit],
+    atoms: list[_Unit],
     hanging: bool,
     ambiguous_width: int,
     rules: KinsokuRules = _JA,
-) -> List[_Unit]:
+) -> list[_Unit]:
     """Merge atoms that must not be separated according to kinsoku rules."""
-    units: List[_Unit] = []
+    units: list[_Unit] = []
     no_start = rules.no_start
     no_end = rules.no_end
     for a in atoms:
@@ -1100,7 +1092,7 @@ def _split_prep(
     ruby: bool = False,
     ruby_width: str = "full",
     rules: KinsokuRules = _JA,
-) -> Tuple[List[str], List[int], FrozenSet[int]]:
+) -> tuple[list[str], list[int], frozenset[int]]:
     """Clusters of ``u``, their widths and the indices no break may come
     before (next to a quote, #52), for :func:`_chunk_end`."""
     if ruby:
@@ -1112,7 +1104,7 @@ def _split_prep(
         ws = [width(c, ambiguous_width) for c in cls]
     if "ﾞ" in u.text or "ﾟ" in u.text:
         cls, ws = _join_sound_marks(cls, ws)
-    nobreak: FrozenSet[int] = frozenset()
+    nobreak: frozenset[int] = frozenset()
     qs = rules.quotes - rules.no_start - rules.no_end
     if qs and any(q in u.text for q in qs):
         kinds = iter(_quote_kinds(cls, False, qs, rules.no_start, rules.no_end))
@@ -1128,13 +1120,13 @@ def _split_prep(
 
 
 def _chunk_end(
-    cls: List[str],
-    ws: List[int],
+    cls: list[str],
+    ws: list[int],
     start: int,
     limit: int,
     rules: KinsokuRules = _JA,
     ruby: bool = False,
-    nobreak: FrozenSet[int] = frozenset(),
+    nobreak: frozenset[int] = frozenset(),
 ) -> int:
     """End index of the hard-split chunk that starts at ``cls[start]``.
 
@@ -1174,13 +1166,13 @@ def _split_long(
     rules: KinsokuRules = _JA,
     ruby: bool = False,
     ruby_width: str = "full",
-) -> List[_Unit]:
+) -> list[_Unit]:
     """Hard-split an over-long unit into chunks no wider than ``limit``.
 
     Ruby notations (``ruby=True``) are never split.
     """
     cls, ws, nobreak = _split_prep(u, ambiguous_width, ruby, ruby_width, rules)
-    chunks: List[_Unit] = []
+    chunks: list[_Unit] = []
     start = 0
     n = len(cls)
     while start < n:
@@ -1192,7 +1184,7 @@ def _split_long(
 
 def _strip_wide_ruby(text: str, limit: int, aw: int, ruby_width: str) -> str:
     """Replace each ruby notation of ``text`` wider than ``limit`` by its base."""
-    out: List[str] = []
+    out: list[str] = []
     for cl, w in _pieces(text, aw, True, ruby_width):
         if w > limit and "《" in cl:
             cl = strip_ruby(cl)  # escapes around the notation are kept
@@ -1201,14 +1193,14 @@ def _strip_wide_ruby(text: str, limit: int, aw: int, ruby_width: str) -> str:
 
 
 def _unruby_wide(
-    units: List[_Unit],
+    units: list[_Unit],
     limit: int,
     hanging: bool,
     keep_all: bool,
     aw: int,
     rules: KinsokuRules,
     ruby_width: str,
-) -> List[_Unit]:
+) -> list[_Unit]:
     """Make ruby notations that fit on no line breakable (#51).
 
     A ruby notation wider than ``limit`` (the widest line) cannot be kept
@@ -1217,7 +1209,7 @@ def _unruby_wide(
     re-attached to parts of the base: which reading belongs to which base
     character is unknown (``｜魔法少女《マジカルガール》``).
     """
-    out: List[_Unit] = []
+    out: list[_Unit] = []
     for u in units:
         if u.space or u.width - u.hang <= limit or "《" not in u.text:
             out.append(u)
@@ -1230,11 +1222,11 @@ def _unruby_wide(
     return out
 
 
-def _join_sound_marks(cls: List[str], ws: List[int]) -> Tuple[List[str], List[int]]:
+def _join_sound_marks(cls: list[str], ws: list[int]) -> tuple[list[str], list[int]]:
     """Merge each halfwidth ﾞ / ﾟ into the preceding cluster."""
-    out_c: List[str] = []
-    out_w: List[int] = []
-    for c, w in zip(cls, ws):
+    out_c: list[str] = []
+    out_w: list[int] = []
+    for c, w in zip(cls, ws, strict=True):
         if out_c and _base(c) in _HW_SOUND:
             out_c[-1] += c
             out_w[-1] += w
@@ -1255,7 +1247,7 @@ def _wrap_line(
     rules: KinsokuRules = _JA,
     ruby: bool = False,
     ruby_width: str = "full",
-) -> List[str]:
+) -> list[str]:
     units = _glue(
         _atoms(line, ambiguous_width, keep_all, rules, ruby, ruby_width),
         hanging,
@@ -1272,8 +1264,8 @@ def _wrap_line(
             rules,
             ruby_width,
         )
-    lines: List[str] = []
-    cur: List[_Unit] = []
+    lines: list[str] = []
+    cur: list[_Unit] = []
     cur_w = 0
     pending = ""  # escapes of dropped spaces at the start of a line
     lead = True  # cur holds only the paragraph's leading whitespace (#21)
@@ -1378,7 +1370,7 @@ def wrap(
     hanging: bool = False,
     break_long_words: bool = True,
     keep_all: bool = False,
-    max_lines: Optional[int] = None,
+    max_lines: int | None = None,
     placeholder: str = "…",
     ambiguous_width: int = 1,
     rules: RulesLike = "ja",
@@ -1386,7 +1378,7 @@ def wrap(
     ruby: bool = False,
     ruby_width: str = "full",
     tabsize: int = 8,
-) -> List[str]:
+) -> list[str]:
     """Wrap ``text`` so every line fits in ``width`` terminal columns.
 
     Existing newlines are kept as hard line breaks (each input line is a
@@ -1459,7 +1451,7 @@ def wrap(
         raise ValueError("ruby_width must be 'base' or 'full'")
 
     # (indent, body) pairs; the indent stays outside any re-opened styling
-    pairs: List[tuple] = []
+    pairs: list[tuple] = []
     for line in text.splitlines() or [""]:
         if "\t" in line:
             line = _expand_tabs(line, tabsize, ambiguous_width)
@@ -1479,7 +1471,7 @@ def wrap(
         first = wrapped[0]
         visible = strip_ansi(first) if "\x1b" in first else first
         pairs.append((initial_indent if visible else "", first))
-        pairs.extend((subsequent_indent, l) for l in wrapped[1:])
+        pairs.extend((subsequent_indent, line) for line in wrapped[1:])
 
     cut = max_lines is not None and len(pairs) > max_lines
     if cut:
@@ -1571,7 +1563,7 @@ def _is_word(text: str, aw: int) -> bool:
     return all(_char_width(c, aw) == 1 and not "\uff61" <= c <= "\uff9f" for c in v)
 
 
-def _cut_units(text: str, aw: int, rules: KinsokuRules, ruby: bool, ruby_width: str) -> List[_Unit]:
+def _cut_units(text: str, aw: int, rules: KinsokuRules, ruby: bool, ruby_width: str) -> list[_Unit]:
     """Units the placeholder cut drops one at a time.
 
     A latin word (a run of narrow characters, with the punctuation attached
@@ -1579,7 +1571,7 @@ def _cut_units(text: str, aw: int, rules: KinsokuRules, ruby: bool, ruby_width: 
     halfwidth kana and a ruby notation are units of their own; spaces are
     separate units.
     """
-    out: List[_Unit] = []
+    out: list[_Unit] = []
     prev_word = False
     for a in _atoms(text, aw, False, rules, ruby, ruby_width):
         word = not a.space and _is_word(a.text, aw)
@@ -1606,7 +1598,7 @@ def _cut_for_placeholder(
     ruby_width: str = "full",
     indent: str = "",
     alone: bool = True,
-) -> Optional[str]:
+) -> str | None:
     """Cut ``line`` so that ``placeholder`` can follow it within ``width_``.
 
     ``line`` starts with ``indent``, which is kept.  The rest is shortened
@@ -1650,7 +1642,7 @@ def _cut_for_placeholder(
     pieces = list(_pieces(body, aw))
     if "ﾞ" in body or "ﾟ" in body:
         cls, ws = _join_sound_marks([c for c, _ in pieces], [w for _, w in pieces])
-        pieces = list(zip(cls, ws))
+        pieces = list(zip(cls, ws, strict=True))
     total = sum(w for _, w in pieces)
     while pieces and (
         total > budget
@@ -1709,7 +1701,7 @@ def truncate(
     pw = _w(placeholder, ambiguous_width)
     if pw > width:
         raise ValueError("placeholder is wider than width")
-    parts: List[str] = []
+    parts: list[str] = []
     bw = 0
     for cl in _clusters(text):
         cw = _w(cl, ambiguous_width)

@@ -3,7 +3,6 @@ import pytest
 from kinsoku import fill, rewrap, strip_ansi, unwrap, width, wrap
 from kinsoku.cli import main
 
-
 # --- joining ----------------------------------------------------------------
 
 

@@ -35,7 +35,7 @@ through to :func:`kinsoku.wrap`.
 from __future__ import annotations
 
 import textwrap
-from typing import Any, List, Optional
+from typing import Any
 
 from ._core import _check_ambiguous_width, _check_width, _expand_tabs
 from ._core import width as _width
@@ -76,7 +76,7 @@ class KinsokuWrapper(textwrap.TextWrapper):
         break_on_hyphens: bool = True,
         tabsize: int = 8,
         *,
-        max_lines: Optional[int] = None,
+        max_lines: int | None = None,
         placeholder: str = " [...]",
         hanging: bool = False,
         keep_all: bool = False,
@@ -109,7 +109,7 @@ class KinsokuWrapper(textwrap.TextWrapper):
             text = text.translate(_WHITESPACE_TRANS)
         return text
 
-    def wrap(self, text: str) -> List[str]:
+    def wrap(self, text: str) -> list[str]:
         """Wrap ``text`` and return a list of lines without final newlines.
 
         Like textwrap, an empty or whitespace-only ``text`` gives ``[]``.

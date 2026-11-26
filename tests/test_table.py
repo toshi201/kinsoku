@@ -274,7 +274,8 @@ def test_cli_markdown(monkeypatch, capsys):
 
 
 def test_table_passes_rules_to_wrap():
-    from kinsoku import table as _table, wrap as _wrap
+    from kinsoku import table as _table
+    from kinsoku import wrap as _wrap
 
     plain = _table([["あいッう"]], width=4, style="plain")
     loose = _table([["あいッう"]], width=4, style="plain", rules="loose")

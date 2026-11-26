@@ -234,7 +234,7 @@ def test_other_encoding_is_respected(tmp_path, capsys):
     assert main(["--encoding", "utf-16", "--width-of", str(f)]) == 0
     assert capsys.readouterr().out == "4\n"
     g = tmp_path / "b.txt"
-    g.write_bytes(BOM + "a\n".encode())
+    g.write_bytes(BOM + b"a\n")
     assert main(["--encoding", "latin-1", "--unwrap", str(g)]) == 0
     assert capsys.readouterr().out == "ï»¿a\n"
 

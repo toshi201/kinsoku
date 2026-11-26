@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import List, Optional, Tuple
 
 from ._core import _ANSI_RE, NO_END, NO_START, char_width, strip_ansi, wrap
 
@@ -24,7 +23,7 @@ _NEUTRAL = frozenset("…‥―─")
 _HALF_SPACES = " \t"
 
 
-def _split_lines(text: str) -> List[Tuple[str, str]]:
+def _split_lines(text: str) -> list[tuple[str, str]]:
     lines = []
     for m in _LINE_RE.finditer(text):
         body, term = m.group(1), m.group(2)
@@ -36,9 +35,9 @@ def _split_lines(text: str) -> List[Tuple[str, str]]:
     return lines
 
 
-def _tokens(s: str) -> List[str]:
+def _tokens(s: str) -> list[str]:
     """Split ``s`` into single characters and whole ANSI escape sequences."""
-    out: List[str] = []
+    out: list[str] = []
     pos = 0
     while pos < len(s):
         m = _ANSI_RE.match(s, pos) if s[pos] == "\x1b" else None
@@ -58,7 +57,7 @@ def _is_esc(tok: str) -> bool:
 def _rstrip_visible(s: str) -> str:
     """Remove trailing whitespace, keeping ANSI escapes that follow it."""
     toks = _tokens(s)
-    kept: List[str] = []
+    kept: list[str] = []
     while toks and (_is_esc(toks[-1]) or toks[-1].isspace()):
         t = toks.pop()
         if _is_esc(t):
@@ -69,7 +68,7 @@ def _rstrip_visible(s: str) -> str:
 def _lstrip_half(s: str) -> str:
     """Remove leading half-width spaces/tabs, keeping ANSI escapes before them."""
     toks = _tokens(s)
-    kept: List[str] = []
+    kept: list[str] = []
     i = 0
     while i < len(toks) and (_is_esc(toks[i]) or toks[i] in _HALF_SPACES):
         if _is_esc(toks[i]):
@@ -149,7 +148,7 @@ def _starts_paragraph(body: str, indent_marks_paragraph: bool) -> bool:
 
 def _paragraphs(text: str, indent_marks_paragraph: bool, cjk_latin_space: bool = False):
     """Yield ``(is_blank, joined_body, terminator)`` for each output line."""
-    cur: Optional[str] = None
+    cur: str | None = None
     term = ""
     for body, t in _split_lines(text):
         if _is_blank(body):
@@ -199,13 +198,13 @@ def unwrap(
         text or digits at a line break (the old default; it adds spaces
         that ``fill`` did not remove, so the round trip is not exact).
     """
-    out: List[str] = []
+    out: list[str] = []
     for _, body, term in _paragraphs(text, indent_marks_paragraph, cjk_latin_space):
         out.append(body + term)
     return "".join(out)
 
 
-def _leading_space(s: str) -> Tuple[str, str]:
+def _leading_space(s: str) -> tuple[str, str]:
     n = len(s) - len(s.lstrip(" \t　"))
     return s[:n], s[n:]
 
@@ -222,7 +221,8 @@ def rewrap(
 
     Blank lines are kept. A paragraph's own leading indentation (e.g. a
     U+3000 kept by ``indent_marks_paragraph=True``) is preserved and added to
-    ``initial_indent``. ``cjk_latin_space`` is passed to :func:`unwrap`. Other keyword arguments are passed to :func:`wrap`;
+    ``initial_indent``. ``cjk_latin_space`` is passed to :func:`unwrap`.
+    Other keyword arguments are passed to :func:`wrap`;
     ``max_lines`` limits the whole output, like in :func:`wrap`.
     """
     max_lines = wrap_kwargs.pop("max_lines", None)
@@ -240,13 +240,18 @@ def rewrap(
     nl = "\r\n" if "\r\n" in text else "\n"
 
     items = list(_paragraphs(text, indent_marks_paragraph, cjk_latin_space))
-    lines: List[str] = []
+    lines: list[str] = []
     for i, (blank, body, _term) in enumerate(items):
         lead, rest = ("", "") if blank else _leading_space(body)
 
-        def wrapped(extra: str = "", **kw) -> List[str]:
+        # wrapped() is only called within this iteration, so the late binding is fine
+        def wrapped(extra: str = "", **kw) -> list[str]:
             return wrap(
-                rest + extra, width, initial_indent=initial_indent + lead, **wrap_kwargs, **kw
+                rest + extra,  # noqa: B023
+                width,
+                initial_indent=initial_indent + lead,  # noqa: B023
+                **wrap_kwargs,
+                **kw,
             )
 
         new = [body] if blank else wrapped()

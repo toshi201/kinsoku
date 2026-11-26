@@ -3,7 +3,7 @@ import unicodedata
 import pytest
 
 import kinsoku
-from kinsoku import HANGABLE, NO_END, NO_START, tategaki, width
+from kinsoku import NO_START, tategaki, width
 from kinsoku.cli import main
 from kinsoku.tategaki import VERTICAL_FORMS
 
@@ -87,7 +87,7 @@ def test_gap():
 
 
 def test_vertical_forms_are_valid():
-    for src, dst in VERTICAL_FORMS.items():
+    for dst in VERTICAL_FORMS.values():
         unicodedata.name(dst)  # raises if unassigned
     assert VERTICAL_FORMS["「"] == "﹁"
     assert unicodedata.name(VERTICAL_FORMS["。"]).startswith("PRESENTATION FORM FOR VERTICAL")
@@ -123,7 +123,7 @@ def test_newline_starts_new_column():
 
 @pytest.mark.parametrize("hanging", [True, False])
 def test_punctuation_not_at_column_top(hanging):
-    text = "吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ、「猫」と（小声で）泣いた。"
+    text = "吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ、「猫」と（小声で）泣いた。"  # noqa: E501 (全角文字の例文)
     for h in range(3, 9):
         out = tategaki(text, h, hanging=hanging)
         for col in grid(out):

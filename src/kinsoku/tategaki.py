@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import List, Optional, Tuple
 
 from ._core import (
     HANGABLE,
@@ -68,7 +67,7 @@ VERTICAL_FORMS = {
 _HALFWIDTH_MODES = ("fullwidth", "pair")
 
 # A cell: (first original char, last original char, display string).
-_Cell = Tuple[str, str, str]
+_Cell = tuple[str, str, str]
 
 
 def _is_ascii(ch: str) -> bool:
@@ -96,13 +95,13 @@ def _hw_kana(cl: str) -> str:
     return unicodedata.normalize("NFC", fw)
 
 
-def _cells(line: str, halfwidth: str) -> List[_Cell]:
-    cells: List[_Cell] = []
+def _cells(line: str, halfwidth: str) -> list[_Cell]:
+    cells: list[_Cell] = []
     if halfwidth == "fullwidth" and _HW_KANA_RE.search(line):
         # Half-width katakana (with its sound mark) becomes one full-width
         # cluster; mark the result so the original chars stay available for
         # the kinsoku checks.
-        clusters: List[Tuple[str, str]] = []
+        clusters: list[tuple[str, str]] = []
         pos = 0
         for m in _HW_KANA_RE.finditer(line):
             clusters.extend((cl, cl) for cl in _clusters_plain(line[pos : m.start()]))
@@ -151,9 +150,9 @@ def _cells(line: str, halfwidth: str) -> List[_Cell]:
     return cells
 
 
-def _layout(cells: List[_Cell], height: int, hanging: bool) -> List[List[_Cell]]:
-    columns: List[List[_Cell]] = []
-    cur: List[_Cell] = []
+def _layout(cells: list[_Cell], height: int, hanging: bool) -> list[list[_Cell]]:
+    columns: list[list[_Cell]] = []
+    cur: list[_Cell] = []
     for c in cells:
         if len(cur) < height:
             cur.append(c)
@@ -163,7 +162,7 @@ def _layout(cells: List[_Cell], height: int, hanging: bool) -> List[List[_Cell]]
             continue
         # Find the latest break position j (cur[:j] stays, cur[j:] + [c]
         # moves to the next column) that satisfies both kinsoku rules.
-        split: Optional[int] = None
+        split: int | None = None
         for j in range(len(cur), 0, -1):
             moved = len(cur) - j + 1
             if moved > height:
@@ -221,7 +220,7 @@ def tategaki(
     lines = text.splitlines()
     if not lines:
         return ""
-    columns: List[List[_Cell]] = []
+    columns: list[list[_Cell]] = []
     for line in lines:
         columns.extend(_layout(_cells(line, halfwidth), height, hanging))
     # A hanging char makes its column height + 1 long; pad all to match.

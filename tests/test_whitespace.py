@@ -9,7 +9,6 @@ import kinsoku
 from kinsoku import KinsokuWrapper, fill, strip_ansi, width, wrap
 from kinsoku.cli import main
 
-
 # --- #21: leading whitespace of a paragraph is kept --------------------------
 
 
@@ -155,15 +154,15 @@ def test_fill_passes_tabsize():
 
 
 def test_cli_tabs():
-    run = lambda args, inp: (
-        subprocess.run(
+    def run(args, inp):
+        return subprocess.run(
             [sys.executable, "-m", "kinsoku", *args],
             input=inp,
             capture_output=True,
             text=True,
             check=True,
         ).stdout
-    )
+
     assert run(["--width-of"], "あい\tう\n") == "10\n"
     assert run(["--width-of", "--tabsize", "3"], "あい\tう\n") == "8\n"
     assert run(["-w", "40"], "a\tb\n") == "a       b\n"

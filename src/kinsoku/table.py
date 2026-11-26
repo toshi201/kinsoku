@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable, List, Optional, Sequence, Union
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 from ._core import (
     _check_align,
@@ -39,7 +40,7 @@ def _cell(value: Any) -> str:
     return "" if value is None else str(value)
 
 
-def _per_column(name: str, value: Any, ncols: int, default: Any) -> List[Any]:
+def _per_column(name: str, value: Any, ncols: int, default: Any) -> list[Any]:
     """Expand a scalar or per-column sequence to exactly ``ncols`` items."""
     if value is None or isinstance(value, (str, int)):
         return [default if value is None else value] * ncols
@@ -49,8 +50,8 @@ def _per_column(name: str, value: Any, ncols: int, default: Any) -> List[Any]:
     return items + [default] * (ncols - len(items))
 
 
-def _cell_lines(text: str, limit: Optional[int], aw: int, wrap_kwargs: dict) -> List[str]:
-    lines: List[str] = []
+def _cell_lines(text: str, limit: int | None, aw: int, wrap_kwargs: dict) -> list[str]:
+    lines: list[str] = []
     for line in text.splitlines() or [""]:
         if limit is not None and _w(line, aw) > limit:
             lines.extend(wrap(line, limit, ambiguous_width=aw, **wrap_kwargs))
@@ -69,11 +70,11 @@ def _md_escape(s: str) -> str:
 
 def table(
     rows: Iterable[Sequence[Any]],
-    headers: Optional[Sequence[Any]] = None,
+    headers: Sequence[Any] | None = None,
     *,
-    align: Union[str, Sequence[str], None] = None,
-    max_col_width: Union[int, Sequence[Optional[int]], None] = None,
-    width: Optional[int] = None,
+    align: str | Sequence[str] | None = None,
+    max_col_width: int | Sequence[int | None] | None = None,
+    width: int | None = None,
     style: str = "simple",
     ambiguous_width: int = 1,
     **wrap_kwargs: Any,
@@ -139,13 +140,10 @@ def table(
         return max(_w(line, aw) for r in all_rows for line in r[i].splitlines() or [""])
 
     cols = [natural(i) for i in range(ncols)]
-    cols = [c if lim is None else min(c, lim) for c, lim in zip(cols, limits)]
+    cols = [c if lim is None else min(c, lim) for c, lim in zip(cols, limits, strict=True)]
 
     # 2. shrink to the total width budget, widest column first
-    if style in ("simple", "plain"):
-        overhead = 2 * (ncols - 1)
-    else:
-        overhead = 3 * (ncols - 1) + 4
+    overhead = 2 * (ncols - 1) if style in ("simple", "plain") else 3 * (ncols - 1) + 4
     if width is not None:
         while sum(cols) + overhead > width:
             i = max(range(ncols), key=lambda k: cols[k])
@@ -156,14 +154,14 @@ def table(
     # 3. wrap cells, then use the actual widths (wrapping may leave slack)
     cells = [[_cell_lines(r[i], cols[i], aw, wrap_kwargs) for i in range(ncols)] for r in all_rows]
     if style == "markdown":
-        cells = [[["<br>".join(_md_escape(l) for l in c)] for c in r] for r in cells]
+        cells = [[["<br>".join(_md_escape(s) for s in c)] for c in r] for r in cells]
     cols = [max(_w(line, aw) for r in cells for line in r[i]) for i in range(ncols)]
     if style == "markdown":
         cols = [max(3, c) for c in cols]
 
     box = _ASCII if aw == 2 else _BOX
 
-    def render(row: List[List[str]]) -> List[str]:
+    def render(row: list[list[str]]) -> list[str]:
         height = max(len(c) for c in row)
         out = []
         for k in range(height):
@@ -180,7 +178,7 @@ def table(
                 out.append(f"{v} " + f" {v} ".join(parts) + f" {v}")
         return out
 
-    lines: List[str] = []
+    lines: list[str] = []
     head_cells, body_cells = (cells[0], cells[1:]) if head is not None else (None, cells)
 
     if style in ("simple", "plain"):
@@ -197,7 +195,9 @@ def table(
             "right": lambda n: "-" * (n - 1) + ":",
             "center": lambda n: ":" + "-" * (n - 2) + ":",
         }
-        lines.append("| " + " | ".join(marks[a](c) for a, c in zip(aligns, cols)) + " |")
+        lines.append(
+            "| " + " | ".join(marks[a](c) for a, c in zip(aligns, cols, strict=True)) + " |"
+        )
         for r in body_cells:
             lines += render(r)
     else:  # grid
