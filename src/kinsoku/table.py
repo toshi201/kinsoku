@@ -5,13 +5,12 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable, List, Optional, Sequence, Union
 
-from ._core import pad, wrap
+from ._core import _check_align, _check_ambiguous_width, _check_width, pad, wrap
 from ._core import width as _w
 
 __all__ = ["table", "STYLES"]
 
 STYLES = ("simple", "grid", "markdown", "plain")
-_ALIGNS = ("left", "right", "center")
 _MIN_SHRINK = 4
 
 _SGR = re.compile(r"\x1b\[[0-9;:]*m")
@@ -103,8 +102,9 @@ def table(
         (``None`` becomes an empty cell). Rows shorter than the widest row
         (or the headers) are padded with empty cells.
     :param headers: optional header row.
-    :param align: ``"left"`` (default), ``"right"`` or ``"center"``, or a
-        sequence with one value per column (missing entries are left).
+    :param align: ``"left"`` (default), ``"right"`` or ``"center"`` (or
+        ``"<"``, ``">"``, ``"^"``), or a sequence with one value per column
+        (missing entries are left).
     :param max_col_width: maximum display width of a column (int, or a
         sequence of int/``None`` per column). Wider cells are wrapped with
         :func:`kinsoku.wrap`, so kinsoku rules apply inside cells. Embedded
@@ -124,10 +124,9 @@ def table(
     """
     if style not in STYLES:
         raise ValueError(f"unknown style {style!r} (choose from {', '.join(STYLES)})")
-    if ambiguous_width not in (1, 2):
-        raise ValueError("ambiguous_width must be 1 or 2")
-    if width is not None and width < 1:
-        raise ValueError(f"invalid width {width!r} (must be > 0)")
+    if width is not None:
+        _check_width(width)
+    _check_ambiguous_width(ambiguous_width)
     aw = ambiguous_width
 
     body = [[_cell(c) for c in row] for row in rows]
@@ -142,10 +141,7 @@ def table(
     elif style == "markdown":
         head = [""] * ncols  # a pipe table always needs a header row
 
-    aligns = _per_column("align", align, ncols, "left")
-    for a in aligns:
-        if a not in _ALIGNS:
-            raise ValueError(f"unknown align {a!r} (choose from left, right, center)")
+    aligns = [_check_align(a) for a in _per_column("align", align, ncols, "left")]
     limits = _per_column("max_col_width", max_col_width, ncols, None)
     for lim in limits:
         if lim is not None and (not isinstance(lim, int) or lim < 1):

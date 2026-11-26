@@ -28,10 +28,10 @@ through to :func:`kinsoku.wrap`.
 
 from __future__ import annotations
 
-import re
 import textwrap
 from typing import Any, List, Optional
 
+from ._core import _check_ambiguous_width, _check_width, _expand_tabs
 from ._core import width as _width
 from ._core import wrap as _wrap
 
@@ -40,28 +40,7 @@ __all__ = ["KinsokuWrapper", "dedent", "indent"]
 dedent = textwrap.dedent
 indent = textwrap.indent
 
-_TAB_SPLIT_RE = re.compile(r"(\t|\r\n|\n|\r)")
 _WHITESPACE_TRANS = {ord(c): " " for c in "\t\n\x0b\x0c\r"}
-
-
-def _expandtabs(text: str, tabsize: int, ambiguous_width: int) -> str:
-    """``str.expandtabs`` that counts columns by display width."""
-    if "\t" not in text:
-        return text
-    out: List[str] = []
-    col = 0
-    for part in _TAB_SPLIT_RE.split(text):
-        if part == "\t":
-            n = tabsize - col % tabsize if tabsize > 0 else 0
-            out.append(" " * n)
-            col += n
-        elif part in ("\r\n", "\n", "\r"):
-            out.append(part)
-            col = 0
-        else:
-            out.append(part)
-            col += _width(part, ambiguous_width)
-    return "".join(out)
 
 
 class KinsokuWrapper(textwrap.TextWrapper):
@@ -119,7 +98,7 @@ class KinsokuWrapper(textwrap.TextWrapper):
 
     def _munge_whitespace(self, text: str) -> str:
         if self.expand_tabs:
-            text = _expandtabs(text, self.tabsize, self.ambiguous_width)
+            text = _expand_tabs(text, self.tabsize, self.ambiguous_width)
         if self.replace_whitespace:
             text = text.translate(_WHITESPACE_TRANS)
         return text
@@ -128,7 +107,11 @@ class KinsokuWrapper(textwrap.TextWrapper):
         """Wrap ``text`` and return a list of lines without final newlines.
 
         Like textwrap, an empty or whitespace-only ``text`` gives ``[]``.
+        ``width`` and ``ambiguous_width`` are checked first, even then, with
+        the same ValueError as :func:`kinsoku.wrap`.
         """
+        _check_width(self.width)
+        _check_ambiguous_width(self.ambiguous_width)
         text = self._munge_whitespace(text)
         if not text.strip():
             return []
