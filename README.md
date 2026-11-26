@@ -124,6 +124,7 @@ print(kinsoku.indent(kinsoku.dedent(doc), "> "))
 ```
 
 - `placeholder` の既定値は互換性のため textwrap と同じ `" [...]"`。日本語には `"…"` がおすすめ
+- `max_lines` で最終行を削るときは textwrap と同じく英単語を単語ごと落とします（和文は1文字ずつ）。ただし、1行目の最初の単語すら `placeholder` と一緒に入らないときや、1語で行が埋まるほど長い単語は、textwrap のように消さずに文字単位で切ります（`"Hell [...]"`）
 - `expand_tabs` / `tabsize` は表示幅で計算（全角は2桁）
 - `replace_whitespace=True`（既定）では textwrap と同様に改行も空白に置き換わるため、改行は段落区切りになりません。段落を保ちたいときは `replace_whitespace=False`
 - 区切り位置の空白は常に削除されます（`drop_whitespace=False` は無効）。`fix_sentence_endings` / `break_on_hyphens` は受け付けますが無視します
@@ -318,6 +319,7 @@ kinsoku.ruby_to_html("漢字《かんじ》")  # => '<ruby>漢字<rt>かんじ</
 - 親文字: `｜`（または半角 `|`）があればそこから `《` まで、なければ直前の漢字の連続（`々〆ヶ〇` を含む）
 - `ruby_width="full"`（既定）: 記法をそのまま表示する前提で、`｜《》` とルビも幅に数える
 - `ruby_width="base"`: 親文字の幅だけを数える（あとで本物のルビとして描画する場合）
+- 行幅より広いルビのかたまりは、`break_long_words=True`（既定）ならルビを外して親文字だけにし、普通の文字として折り返します（`wrap("彼女は｜魔法少女《マジカルガール》になった。", 20, ruby=True)` → `['彼女は魔法少女になっ', 'た。']`）。親文字のどこにどのルビが付くかは分からないため、親文字を割ってルビを付け直すことはしません。`break_long_words=False` なら記法を保ったまま、その行だけ `width` をはみ出します
 - CLI: `kinsoku -w 40 --ruby [--ruby-width base] novel.txt`
 
 ## 仕様

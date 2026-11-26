@@ -231,8 +231,14 @@ def test_max_lines(text, kw, max_lines):
     if len(full) <= max_lines:
         assert lines == full
     else:
-        assert lines[:-1] == full[: max_lines - 1]
         assert strip_ansi(lines[-1]).endswith("…")
+        if lines[:-1] != full[: max_lines - 1]:
+            # nothing of the cut line fitted: like textwrap, the placeholder
+            # went to the end of the previous line (#50)
+            k = len(lines) - 1
+            assert k == max_lines - 2
+            assert lines[:-1] == full[:k]
+            assert strip_ansi(lines[-1]) == strip_ansi(full[k]) + "…"
 
 
 # --- regression tests for bugs found by the properties above -----------------
