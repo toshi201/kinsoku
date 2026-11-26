@@ -116,15 +116,20 @@ def _is_hangul(c: str) -> bool:
     )
 
 
-def _separator(left: str, right: str, cjk_latin_space: bool = False) -> str:
-    """Return "" or " " to put between two joined lines (both already stripped)."""
-    lv, rv = strip_ansi(left), strip_ansi(right)
-    if not lv or not rv:
+def _junction(l_last2: str, lc: str, right: str, cjk_latin_space: bool) -> str:
+    """Return "" or " " for a junction, given the left side as a summary.
+
+    ``l_last2`` is the last (up to) two visible characters of the left side
+    (empty if it has none) and ``lc`` its deciding character (see
+    :func:`_pick`). Only the start of ``right`` is examined.
+    """
+    rv = strip_ansi(right)
+    if not l_last2 or not rv:
         return ""
     # Hyphenated line end: keep the hyphen, join without a space.
-    if lv[-1] == "-" and len(lv) >= 2 and _is_latin_letter(lv[-2]):
+    if l_last2[-1] == "-" and len(l_last2) >= 2 and _is_latin_letter(l_last2[-2]):
         return ""
-    lc, rc = _pick(lv, True), _pick(rv, False)
+    rc = _pick(rv, False)
     if _is_cjk_punct(lc) or _is_cjk_punct(rc):
         return ""
     lw, rw = _is_wide(lc), _is_wide(rc)
@@ -135,6 +140,103 @@ def _separator(left: str, right: str, cjk_latin_space: bool = False) -> str:
     if not cjk_latin_space and ((lw and not _is_hangul(lc)) or (rw and not _is_hangul(rc))):
         return ""
     return " "
+
+
+def _separator(left: str, right: str, cjk_latin_space: bool = False) -> str:
+    """Return "" or " " to put between two joined lines (both already stripped)."""
+    lv = strip_ansi(left)
+    return _junction(lv[-2:], _pick(lv, True), right, cjk_latin_space)
+
+
+_NEUTRAL_STR = "".join(sorted(_NEUTRAL))
+
+
+def _escape_settled(s: str, i: int) -> bool:
+    """Whether matching ``_ANSI_RE`` at ``s[i] == "\\x1b"`` cannot change when
+    more text is appended to ``s`` (the regex never looks at the end of ``s``)."""
+    n = len(s)
+    if i + 1 >= n:
+        return False
+    c = s[i + 1]
+    if c == "[":
+        # CSI: parameter/intermediate bytes (0x20-0x3F) run up to the end?
+        return any(not " " <= s[k] <= "?" for k in range(i + 2, n))
+    if c == "]":
+        # OSC: settled once its terminator (BEL, or ESC + one more char) is seen.
+        for k in range(i + 2, n):
+            if s[k] == "\x07":
+                return True
+            if s[k] == "\x1b":
+                return k + 1 < n
+        return False
+    return True
+
+
+class _Joiner:
+    """A paragraph being joined line by line in linear time.
+
+    It keeps the pieces of the joined text, a summary of its visible text
+    (``strip_ansi`` of everything so far) for deciding the next junction,
+    and only the short unsettled tail (an escape sequence that the next
+    line could still complete) unclassified.
+    """
+
+    __slots__ = ("pieces", "last2", "pick", "pending")
+
+    def __init__(self, first: str) -> None:
+        self.pieces: list[str] = []
+        self.last2 = ""  # last two settled visible characters
+        self.pick = ""  # last settled visible character not in _NEUTRAL
+        self.pending = ""  # unsettled tail, starting at a scan boundary
+        self._add(first)
+
+    def _visible(self, v: str) -> None:
+        if v:
+            self.last2 = (self.last2 + v[-2:])[-2:]
+            w = v.rstrip(_NEUTRAL_STR)
+            if w:
+                self.pick = w[-1]
+
+    def _add(self, s: str) -> None:
+        self.pieces.append(s)
+        u = self.pending + s if self.pending else s
+        pos = 0
+        while True:
+            j = u.find("\x1b", pos)
+            if j < 0:
+                self._visible(u[pos:])
+                self.pending = ""
+                return
+            self._visible(u[pos:j])
+            if not _escape_settled(u, j):
+                self.pending = u[j:]
+                return
+            m = _ANSI_RE.match(u, j)
+            if m:
+                pos = m.end()
+            else:
+                self._visible("\x1b")
+                pos = j + 1
+
+    def join(self, nxt: str, cjk_latin_space: bool) -> None:
+        """Append the next line (leading half-width spaces already removed)."""
+        last2, lc = self.last2, self.pick
+        if self.pending:
+            vu = strip_ansi(self.pending)
+            if vu:
+                last2 = (last2 + vu[-2:])[-2:]
+                w = vu.rstrip(_NEUTRAL_STR)
+                if w:
+                    lc = w[-1]
+        if not lc:  # only neutral punctuation: it decides
+            lc = last2[-1:]
+        sep = _junction(last2, lc, nxt, cjk_latin_space)
+        if sep:
+            self._add(sep)
+        self._add(_rstrip_visible(nxt))
+
+    def text(self) -> str:
+        return "".join(self.pieces)
 
 
 def _is_blank(body: str) -> bool:
@@ -152,24 +254,23 @@ def _paragraphs(
     text: str, indent_marks_paragraph: bool, cjk_latin_space: bool = False
 ) -> Iterator[tuple[bool, str, str]]:
     """Yield ``(is_blank, joined_body, terminator)`` for each output line."""
-    cur: str | None = None
+    cur: _Joiner | None = None
     term = ""
     for body, t in _split_lines(text):
         if _is_blank(body):
             if cur is not None:
-                yield False, cur, term
+                yield False, cur.text(), term
                 cur = None
             yield True, body, t
         elif cur is None or _starts_paragraph(body, indent_marks_paragraph):
             if cur is not None:
-                yield False, cur, term
-            cur, term = _rstrip_visible(body), t
+                yield False, cur.text(), term
+            cur, term = _Joiner(_rstrip_visible(body)), t
         else:
-            nxt = _lstrip_half(body)
-            cur = cur + _separator(cur, nxt, cjk_latin_space) + _rstrip_visible(nxt)
+            cur.join(_lstrip_half(body), cjk_latin_space)
             term = t
     if cur is not None:
-        yield False, cur, term
+        yield False, cur.text(), term
 
 
 def unwrap(
