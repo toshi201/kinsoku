@@ -22,8 +22,9 @@ def grid(out, gap=1):
             # Rows may mix wide and narrow chars; walk by display width.
             pos, start, cell = 0, (ncols - 1 - c) * step, ""
             for ch in row:
-                if start <= pos < start + 2 or (pos == start + 2 and kinsoku.char_width(ch) == 0
-                                                and cell):
+                if start <= pos < start + 2 or (
+                    pos == start + 2 and kinsoku.char_width(ch) == 0 and cell
+                ):
                     cell += ch
                 pos += kinsoku.char_width(ch)
             cells.append(cell)
@@ -59,12 +60,15 @@ def test_padding_and_equal_widths():
     assert_aligned(out)
 
 
-@pytest.mark.parametrize("text", [
-    "吾輩は猫である。名前はまだ無い。",
-    "「ニャーニャー」泣いていた。\n2024年、ABC！",
-    "éか゚abc\tdef\n\nx",
-    "\x1b[31m赤い\x1b[0m文字……（注）",
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "吾輩は猫である。名前はまだ無い。",
+        "「ニャーニャー」泣いていた。\n2024年、ABC！",
+        "éか゚abc\tdef\n\nx",
+        "\x1b[31m赤い\x1b[0m文字……（注）",
+    ],
+)
 @pytest.mark.parametrize("height", [1, 2, 3, 5, 8])
 @pytest.mark.parametrize("halfwidth", ["fullwidth", "pair"])
 @pytest.mark.parametrize("hanging", [True, False])
@@ -91,8 +95,7 @@ def test_vertical_forms_are_valid():
 
 def test_mapping():
     out = tategaki("「あー」、（い）。…", 20, hanging=False)
-    assert column_text(grid(out)[0]) == [
-        "﹁", "あ", "｜", "﹂", "︑", "︵", "い", "︶", "︒", "︙"]
+    assert column_text(grid(out)[0]) == ["﹁", "あ", "｜", "﹂", "︑", "︵", "い", "︶", "︒", "︙"]
     assert tategaki("『』【】〔〕《》〈〉｛｝", 12).split("\n") == list("﹃﹄︻︼︹︺︽︾︿﹀︷︸")
     assert tategaki("，：；！？‥—―", 8).split("\n") == list("︐︓︔︕︖︰︱︱")
     assert tategaki("～〜", 2).split("\n") == ["≀ ", "≀ "]

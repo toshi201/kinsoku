@@ -36,22 +36,24 @@ pip install kinsoku
 ```python
 import kinsoku
 
-kinsoku.width("日本語abc")             # => 9  (表示幅)
-kinsoku.wrap("あいう。えお", 6)          # => ['あい', 'う。え', 'お']   「。」は行頭に来ない
+kinsoku.width("日本語abc")  # => 9  (表示幅)
+kinsoku.wrap("あいう。えお", 6)  # => ['あい', 'う。え', 'お']   「。」は行頭に来ない
 kinsoku.wrap("あいう。えお", 6, hanging=True)  # => ['あいう。', 'えお']  ぶら下げ
-kinsoku.fill(text, 40)                 # 改行で結合した文字列
-kinsoku.truncate("あいうえお", 6)        # => 'あい…'
-kinsoku.pad("名前", 8, "center")         # => '  名前  '  表の整形に
-kinsoku.pad(kinsoku.truncate("あいうえお", 6), 6)  # => 'あい… '  pad は切り詰めないので、幅をそろえるなら truncate と組み合わせる
+kinsoku.fill(text, 40)  # 改行で結合した文字列
+kinsoku.truncate("あいうえお", 6)  # => 'あい…'
+kinsoku.pad("名前", 8, "center")  # => '  名前  '  表の整形に
+kinsoku.pad(
+    kinsoku.truncate("あいうえお", 6), 6
+)  # => 'あい… '  pad は切り詰めないので、幅をそろえるなら truncate と組み合わせる
 
 # 段落頭の字下げ、行数制限
 kinsoku.wrap("あいうえお\nかきく", 6, initial_indent="\u3000")
 # => ['\u3000あい', 'うえお', '\u3000かき', 'く']
-kinsoku.wrap("あいうえおかきくけこ", 6, max_lines=2)   # => ['あいう', 'えお…']
+kinsoku.wrap("あいうえおかきくけこ", 6, max_lines=2)  # => ['あいう', 'えお…']
 kinsoku.shorten("吾輩は猫である。名前はまだ無い。", 10)  # => '吾輩は猫…'
 
 # 色付き文字列（ANSI エスケープ）もそのまま扱える
-kinsoku.width("\x1b[31m赤い\x1b[0m文字")   # => 8
+kinsoku.width("\x1b[31m赤い\x1b[0m文字")  # => 8
 kinsoku.strip_ansi("\x1b[31m赤い\x1b[0m")  # => '赤い'
 
 # 韓国語のように単語単位で改行したいとき
@@ -111,14 +113,16 @@ kinsoku a.txt - b.txt                # - は標準入力。ファイルごとに
 ```python
 # before
 import textwrap
+
 w = textwrap.TextWrapper(width=40, subsequent_indent="  ")
 print(w.fill(text))
 print(textwrap.indent(textwrap.dedent(doc), "> "))
 
 # after
 import kinsoku
+
 w = kinsoku.KinsokuWrapper(width=40, subsequent_indent="  ", placeholder="…")
-w.hanging = True                       # 属性は後から変更できる
+w.hanging = True  # 属性は後から変更できる
 print(w.fill(text))
 print(kinsoku.indent(kinsoku.dedent(doc), "> "))
 ```
@@ -148,7 +152,7 @@ print(kinsoku.tategaki("吾輩は猫である。名前はまだ無い。\n「ニ
 ```
 
 ```python
-print(kinsoku.tategaki("令和8年12月25日", 5, halfwidth="pair"))   # 縦中横
+print(kinsoku.tategaki("令和8年12月25日", 5, halfwidth="pair"))  # 縦中横
 ```
 
 ```text
@@ -180,16 +184,17 @@ print(kinsoku.tategaki("令和8年12月25日", 5, halfwidth="pair"))   # 縦中�
 | `ko` | 韓国語。閉じ括弧・句読点（`.,!?)]}` を含む）が行頭禁則、開き括弧が行末禁則。仮名の規則はなし |
 
 ```python
-kinsoku.wrap("あいッう", 4)                  # => ['あ', 'いッ', 'う']
-kinsoku.wrap("あいッう", 4, rules="loose")   # => ['あい', 'ッう']
+kinsoku.wrap("あいッう", 4)  # => ['あ', 'いッ', 'う']
+kinsoku.wrap("あいッう", 4, rules="loose")  # => ['あい', 'ッう']
 kinsoku.wrap("他说：“你好，世界。”", 8, rules="zh-hans")
 # => ['他说：', '“你好，', '世界。”']
 
 # 独自ルール: プリセットをもとに一部だけ変える（dataclasses.replace と同じ）
 from kinsoku import KinsokuRules
+
 ja = KinsokuRules.preset("ja")
-rules = ja.replace(no_start=ja.no_start - {"ー"})   # 「ー」の行頭を許す
-kinsoku.wrap("あいーう", 4, rules=rules)       # => ['あい', 'ーう']
+rules = ja.replace(no_start=ja.no_start - {"ー"})  # 「ー」の行頭を許す
+kinsoku.wrap("あいーう", 4, rules=rules)  # => ['あい', 'ーう']
 ```
 
 `KinsokuRules(no_start=..., no_end=..., hangable=..., quotes=...)` は frozen な dataclass で、各フィールドには文字列などの文字の集まりを渡せます（`frozenset` に変換されます）。プリセットの一覧は `kinsoku.PRESETS` です。
@@ -197,7 +202,7 @@ kinsoku.wrap("あいーう", 4, rules=rules)       # => ['あい', 'ーう']
 `quotes`（既定は `"` と `'`）は、開きと閉じが同じ字形の半角クォートです。和文の中では前後の文字から開き・閉じを判定し、開きは次の文字に、閉じは前の文字にくっつけるので、行末・行頭に1つだけ取り残されません（全プリセット共通）。英単語の中（`don't`）や英文の折り返しは変わりません。`quotes=""` で無効にできます。
 
 ```python
-kinsoku.wrap('彼は"テスト"と言った', 6)   # => ['彼は', '"テス', 'ト"と', '言った']
+kinsoku.wrap('彼は"テスト"と言った', 6)  # => ['彼は', '"テス', 'ト"と', '言った']
 ```
 
 ### 色を行ごとに閉じる（ansi_reflow）
@@ -261,8 +266,11 @@ rows = [
     ["大阪", "「天下の台所」と呼ばれた商業の街。", 275],
     ["NYC", "New York City", 830],
 ]
-print(kinsoku.table(rows, ["都市", "説明", "人口(万)"], width=36,
-                    style="grid", align=["left", "left", "right"]))
+print(
+    kinsoku.table(
+        rows, ["都市", "説明", "人口(万)"], width=36, style="grid", align=["left", "left", "right"]
+    )
+)
 ```
 
 ```

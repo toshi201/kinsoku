@@ -12,9 +12,14 @@ from kinsoku.cli import main
 
 # --- #21: leading whitespace of a paragraph is kept --------------------------
 
+
 def test_fullwidth_indent_kept():
     assert wrap("　吾輩は猫である。名前はまだ無い。", 10) == [
-        "　吾輩は猫", "である。名", "前はまだ無", "い。"]
+        "　吾輩は猫",
+        "である。名",
+        "前はまだ無",
+        "い。",
+    ]
 
 
 def test_halfwidth_indent_kept():
@@ -24,7 +29,10 @@ def test_halfwidth_indent_kept():
 
 def test_indent_only_on_first_line_of_each_paragraph():
     assert wrap("　あいうえお かきくけこ\n  さしす", 12) == [
-        "　あいうえお", "かきくけこ", "  さしす"]
+        "　あいうえお",
+        "かきくけこ",
+        "  さしす",
+    ]
 
 
 def test_spaces_at_breaks_still_dropped():
@@ -58,32 +66,33 @@ def test_indent_with_max_lines():
 
 def test_indent_with_ansi_reflow():
     assert wrap("　\x1b[31mあいう\x1b[0m", 6, ansi_reflow=True) == [
-        "　\x1b[31mあい\x1b[0m", "\x1b[31mう\x1b[0m"]
+        "　\x1b[31mあい\x1b[0m",
+        "\x1b[31mう\x1b[0m",
+    ]
 
 
 def test_wrapper_no_double_indent():
-    assert KinsokuWrapper(width=10).wrap("　吾輩は猫である。") == [
-        "　吾輩は猫", "である。"]
-    assert KinsokuWrapper(width=10).wrap("  吾輩は猫である。") == [
-        "  吾輩は猫", "である。"]
+    assert KinsokuWrapper(width=10).wrap("　吾輩は猫である。") == ["　吾輩は猫", "である。"]
+    assert KinsokuWrapper(width=10).wrap("  吾輩は猫である。") == ["  吾輩は猫", "である。"]
     w = KinsokuWrapper(width=10, replace_whitespace=False)
     assert w.wrap("　あ\n  い") == ["　あ", "  い"]
 
 
 def test_rewrap_no_double_indent():
-    out = kinsoku.rewrap("　本文です。本文です。\n", 8,
-                         indent_marks_paragraph=True)
+    out = kinsoku.rewrap("　本文です。本文です。\n", 8, indent_marks_paragraph=True)
     assert out == "　本文で\nす。本文\nです。\n"
 
 
 def test_cli_keeps_indent(capsys, monkeypatch):
     import io
+
     monkeypatch.setattr(sys, "stdin", io.StringIO("第一章\n\n　本文です。\n"))
     assert main(["-w", "10"]) == 0
     assert capsys.readouterr().out == "第一章\n\n　本文で\nす。\n"
 
 
 # --- #16: escapes attached to dropped whitespace are kept --------------------
+
 
 def test_escape_on_dropped_space_kept_on_previous_line():
     assert wrap("ab \x1b[0mcd", 2) == ["ab\x1b[0m", "cd"]
@@ -107,6 +116,7 @@ def test_escape_on_leading_space_of_next_line_kept():
 
 
 # --- #29: tabs ----------------------------------------------------------------
+
 
 def test_width_expands_tabs():
     assert width("a\tb") == 9
@@ -145,15 +155,22 @@ def test_fill_passes_tabsize():
 
 
 def test_cli_tabs():
-    run = lambda args, inp: subprocess.run(
-        [sys.executable, "-m", "kinsoku", *args], input=inp,
-        capture_output=True, text=True, check=True).stdout
+    run = lambda args, inp: (
+        subprocess.run(
+            [sys.executable, "-m", "kinsoku", *args],
+            input=inp,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    )
     assert run(["--width-of"], "あい\tう\n") == "10\n"
     assert run(["--width-of", "--tabsize", "3"], "あい\tう\n") == "8\n"
     assert run(["-w", "40"], "a\tb\n") == "a       b\n"
 
 
 # --- #34: escape-only paragraphs get no indent --------------------------------
+
 
 def test_escape_only_paragraph_gets_no_indent():
     assert wrap("", 10, initial_indent="  ") == [""]
@@ -165,12 +182,18 @@ def test_escape_and_space_only_paragraph_gets_no_indent():
     assert wrap(" \x1b[31m ", 10, initial_indent=">") == ["\x1b[31m"]
 
 
-@pytest.mark.parametrize("text", [
-    "\x1b[0m", " \x1b[31m", "　\x1b[1mあいうえお かき\x1b[0m",
-    "ab \x1b[0mcd", "\x1b[31m\tx", "a\n\x1b[0m\nb",
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "\x1b[0m",
+        " \x1b[31m",
+        "　\x1b[1mあいうえお かき\x1b[0m",
+        "ab \x1b[0mcd",
+        "\x1b[31m\tx",
+        "a\n\x1b[0m\nb",
+    ],
+)
 @pytest.mark.parametrize("w", [2, 3, 5, 10])
 def test_ansi_transparent_examples(text, w):
     kw = dict(initial_indent=" ", subsequent_indent=" ")
-    assert [strip_ansi(l) for l in wrap(text, w, **kw)] == wrap(
-        strip_ansi(text), w, **kw)
+    assert [strip_ansi(l) for l in wrap(text, w, **kw)] == wrap(strip_ansi(text), w, **kw)

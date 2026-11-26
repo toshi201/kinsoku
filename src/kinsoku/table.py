@@ -45,9 +45,7 @@ def _per_column(name: str, value: Any, ncols: int, default: Any) -> List[Any]:
         return [default if value is None else value] * ncols
     items = list(value)
     if len(items) > ncols:
-        raise ValueError(
-            f"{name} has {len(items)} entries but the table has {ncols} columns"
-        )
+        raise ValueError(f"{name} has {len(items)} entries but the table has {ncols} columns")
     return items + [default] * (ncols - len(items))
 
 
@@ -138,9 +136,7 @@ def table(
 
     # 1. natural column widths, capped by max_col_width
     def natural(i: int) -> int:
-        return max(
-            _w(line, aw) for r in all_rows for line in r[i].splitlines() or [""]
-        )
+        return max(_w(line, aw) for r in all_rows for line in r[i].splitlines() or [""])
 
     cols = [natural(i) for i in range(ncols)]
     cols = [c if lim is None else min(c, lim) for c, lim in zip(cols, limits)]
@@ -158,15 +154,10 @@ def table(
             cols[i] -= 1
 
     # 3. wrap cells, then use the actual widths (wrapping may leave slack)
-    cells = [
-        [_cell_lines(r[i], cols[i], aw, wrap_kwargs) for i in range(ncols)]
-        for r in all_rows
-    ]
+    cells = [[_cell_lines(r[i], cols[i], aw, wrap_kwargs) for i in range(ncols)] for r in all_rows]
     if style == "markdown":
         cells = [[["<br>".join(_md_escape(l) for l in c)] for c in r] for r in cells]
-    cols = [
-        max(_w(line, aw) for r in cells for line in r[i]) for i in range(ncols)
-    ]
+    cols = [max(_w(line, aw) for r in cells for line in r[i]) for i in range(ncols)]
     if style == "markdown":
         cols = [max(3, c) for c in cols]
 
@@ -210,6 +201,7 @@ def table(
         for r in body_cells:
             lines += render(r)
     else:  # grid
+
         def rule(kind: str) -> str:
             left, fill, cross, right = box[kind]
             return left + cross.join(fill * (c + 2) for c in cols) + right

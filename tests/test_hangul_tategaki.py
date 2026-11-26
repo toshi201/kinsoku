@@ -98,9 +98,7 @@ def test_wrap_nfd_matches_nfc(s, w):
     lines = wrap(nfd(s), w)
     assert [nfc(x) for x in lines] == wrap(s, w)
     for line in lines:
-        assert unicodedata.category(line[0]) != "Lo" or not (
-            "ᅠ" <= line[0] <= "ᇿ"
-        )
+        assert unicodedata.category(line[0]) != "Lo" or not ("ᅠ" <= line[0] <= "ᇿ")
         assert width(line) <= w
 
 

@@ -23,8 +23,12 @@ except ImportError:  # not installed: use the source tree
     import kinsoku
 
 KANJI = "吾輩猫名前無生頓見当薄暗所泣記憶人間始書生種族中一番獰悪掌載持上時感"
-HIRAGANA = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん"
-KATAKANA = "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン"
+HIRAGANA = (
+    "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん"
+)
+KATAKANA = (
+    "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン"
+)
 SMALL = "ゃゅょっャュョッー"
 WORDS = ["Python", "terminal", "UTF-8", "kinsoku", "API", "example.com", "v1.2.3"]
 COLORS = ["\x1b[31m", "\x1b[32m", "\x1b[1;34m", "\x1b[38;5;208m"]
@@ -86,7 +90,9 @@ def main(argv=None) -> None:
     ap.add_argument("--size", type=int, default=1_000_000, help="text size in bytes")
     ap.add_argument("--repeat", type=int, default=3, help="runs per case (best is shown)")
     ap.add_argument(
-        "--long-word", type=int, default=200_000,
+        "--long-word",
+        type=int,
+        default=200_000,
         help="length of the long-word case (chars)",
     )
     args = ap.parse_args(argv)
@@ -113,8 +119,10 @@ def main(argv=None) -> None:
         ("kinsoku.width", lambda: kinsoku.width(text)),
         ("textwrap.wrap(width=40) [ref]", tw(40)),
         ("textwrap.wrap(width=80) [ref]", tw(80)),
-        (f"kinsoku.wrap(long word {len(long_word) // 1000}k, 76)",
-         lambda: kinsoku.wrap(long_word, 76)),
+        (
+            f"kinsoku.wrap(long word {len(long_word) // 1000}k, 76)",
+            lambda: kinsoku.wrap(long_word, 76),
+        ),
         ("textwrap.wrap(long word, 76) [ref]", lambda: textwrap.wrap(long_word, 76)),
     ]
     print(f"{'case':<36} {'seconds':>9} {'MB/s':>8}")

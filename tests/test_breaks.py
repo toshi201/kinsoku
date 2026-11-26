@@ -10,6 +10,7 @@ PRESET_NAMES = list(PRESETS)
 
 # --- #22: decimals, versions, digit grouping, URLs, file names ----------------
 
+
 @pytest.mark.parametrize("rules", PRESET_NAMES)
 @pytest.mark.parametrize(
     "text, w, expected",
@@ -65,7 +66,8 @@ def test_trailing_punctuation_still_follows_kinsoku():
 def test_infix_inside_ruby_text():
     # the 14-column ruby unit overflows only with break_long_words=False (#51)
     assert wrap("漢字《かんじ》はv1.2.3です", 12, ruby=True, break_long_words=False) == [
-        "漢字《かんじ》", "はv1.2.3です",
+        "漢字《かんじ》",
+        "はv1.2.3です",
     ]
 
 
@@ -81,10 +83,8 @@ def test_infix_inside_ruby_text():
         ("文末はok.」です", 6, "ja", ["文末は", "ok.」", "です"]),
         ("foo..bar", 5, "ja", ["foo..", "bar"]),
         # ANSI escapes around the punctuation
-        ("\x1b[1mfoo\x1b[0m.\"bar\" baz", 6, "ja",
-         ["\x1b[1mfoo\x1b[0m.", '"bar"', "baz"]),
-        ("foo.\x1b[31m\"bar\"\x1b[0m baz", 6, "ja",
-         ["foo.\x1b[31m", '"bar"\x1b[0m', "baz"]),
+        ('\x1b[1mfoo\x1b[0m."bar" baz', 6, "ja", ["\x1b[1mfoo\x1b[0m.", '"bar"', "baz"]),
+        ('foo.\x1b[31m"bar"\x1b[0m baz', 6, "ja", ["foo.\x1b[31m", '"bar"\x1b[0m', "baz"]),
         # zh-hans preset
         ('foo."bar" baz', 6, "zh-hans", ["foo.", '"bar"', "baz"]),
         ("x:(y) z", 3, "zh-hans", ["x:", "(y)", "z"]),
@@ -100,11 +100,13 @@ def test_infix_word_with_ansi(rules):
     text = "\x1b[1mv1\x1b[0m.\x1b[2m2.3\x1b[0m ok"
     assert wrap(text, 7, rules=rules) == ["\x1b[1mv1\x1b[0m.\x1b[2m2.3\x1b[0m", "ok"]
     assert wrap("円周率は\x1b[31m3\x1b[0m.14です", 9, rules=rules) == [
-        "円周率は\x1b[31m", "3\x1b[0m.14です"
+        "円周率は\x1b[31m",
+        "3\x1b[0m.14です",
     ]
 
 
 # --- #24: halfwidth katakana and punctuation -----------------------------------
+
 
 @pytest.mark.parametrize("rules", ["ja", "strict", "loose"])
 def test_halfwidth_punctuation_in_presets(rules):

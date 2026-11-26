@@ -34,20 +34,35 @@ VERTICAL_FORMS = {
     "ー": "｜",  # FULLWIDTH VERTICAL LINE
     "—": "︱",  # PRESENTATION FORM FOR VERTICAL EM DASH
     "―": "︱",
-    "「": "﹁", "」": "﹂",
-    "『": "﹃", "』": "﹄",
-    "（": "︵", "）": "︶",
-    "【": "︻", "】": "︼",
-    "〔": "︹", "〕": "︺",
-    "《": "︽", "》": "︾",
-    "〈": "︿", "〉": "﹀",
-    "｛": "︷", "｝": "︸",
-    "［": "﹇", "］": "﹈",
-    "、": "︑", "。": "︒", "，": "︐",
-    "：": "︓", "；": "︔",
-    "！": "︕", "？": "︖",
-    "…": "︙", "‥": "︰",
-    "～": "≀", "〜": "≀",  # WREATH PRODUCT
+    "「": "﹁",
+    "」": "﹂",
+    "『": "﹃",
+    "』": "﹄",
+    "（": "︵",
+    "）": "︶",
+    "【": "︻",
+    "】": "︼",
+    "〔": "︹",
+    "〕": "︺",
+    "《": "︽",
+    "》": "︾",
+    "〈": "︿",
+    "〉": "﹀",
+    "｛": "︷",
+    "｝": "︸",
+    "［": "﹇",
+    "］": "﹈",
+    "、": "︑",
+    "。": "︒",
+    "，": "︐",
+    "：": "︓",
+    "；": "︔",
+    "！": "︕",
+    "？": "︖",
+    "…": "︙",
+    "‥": "︰",
+    "～": "≀",
+    "〜": "≀",  # WREATH PRODUCT
 }
 
 _HALFWIDTH_MODES = ("fullwidth", "pair")
@@ -90,7 +105,7 @@ def _cells(line: str, halfwidth: str) -> List[_Cell]:
         clusters: List[Tuple[str, str]] = []
         pos = 0
         for m in _HW_KANA_RE.finditer(line):
-            clusters.extend((cl, cl) for cl in _clusters_plain(line[pos:m.start()]))
+            clusters.extend((cl, cl) for cl in _clusters_plain(line[pos : m.start()]))
             clusters.append((m.group(), _hw_kana(m.group())))
             pos = m.end()
         clusters.extend((cl, cl) for cl in _clusters_plain(line[pos:]))
@@ -122,8 +137,7 @@ def _cells(line: str, halfwidth: str) -> List[_Cell]:
         marks = cl[1:]  # combining marks on the base char
         if _is_ascii(ch):
             if halfwidth == "pair":
-                if (not marks and i < n and len(clusters[i][1]) == 1
-                        and _is_ascii(clusters[i][1])):
+                if not marks and i < n and len(clusters[i][1]) == 1 and _is_ascii(clusters[i][1]):
                     s = ch + clusters[i][1]
                     cells.append((s[0], s[1], s))
                     i += 1
@@ -215,6 +229,7 @@ def tategaki(
     sep = " " * gap
     out = []
     for r in range(rows):
-        out.append(sep.join(col[r][2] if r < len(col) else _FULL_SPACE
-                            for col in reversed(columns)))
+        out.append(
+            sep.join(col[r][2] if r < len(col) else _FULL_SPACE for col in reversed(columns))
+        )
     return "\n".join(out)

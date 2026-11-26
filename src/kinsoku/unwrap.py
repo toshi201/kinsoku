@@ -106,9 +106,13 @@ def _is_latin_letter(c: str) -> bool:
 
 def _is_hangul(c: str) -> bool:
     cp = ord(c)
-    return (0x1100 <= cp <= 0x11FF or 0x3130 <= cp <= 0x318F
-            or 0xA960 <= cp <= 0xA97F or 0xAC00 <= cp <= 0xD7FF
-            or 0xFFA0 <= cp <= 0xFFDC)
+    return (
+        0x1100 <= cp <= 0x11FF
+        or 0x3130 <= cp <= 0x318F
+        or 0xA960 <= cp <= 0xA97F
+        or 0xAC00 <= cp <= 0xD7FF
+        or 0xFFA0 <= cp <= 0xFFDC
+    )
 
 
 def _separator(left: str, right: str, cjk_latin_space: bool = False) -> str:
@@ -127,9 +131,7 @@ def _separator(left: str, right: str, cjk_latin_space: bool = False) -> str:
         return ""
     # CJK next to latin/digits: Japanese text usually has no space there
     # (CSS Text 3 segment break rules). Hangul uses spaces between words.
-    if not cjk_latin_space and (
-        (lw and not _is_hangul(lc)) or (rw and not _is_hangul(rc))
-    ):
+    if not cjk_latin_space and ((lw and not _is_hangul(lc)) or (rw and not _is_hangul(rc))):
         return ""
     return " "
 
@@ -227,8 +229,14 @@ def rewrap(
     placeholder = wrap_kwargs.pop("placeholder", "…")
     initial_indent = wrap_kwargs.pop("initial_indent", "")
     # validate the arguments even when the text is empty
-    wrap("", width, initial_indent=initial_indent, max_lines=max_lines,
-         placeholder=placeholder, **wrap_kwargs)
+    wrap(
+        "",
+        width,
+        initial_indent=initial_indent,
+        max_lines=max_lines,
+        placeholder=placeholder,
+        **wrap_kwargs,
+    )
     nl = "\r\n" if "\r\n" in text else "\n"
 
     items = list(_paragraphs(text, indent_marks_paragraph, cjk_latin_space))
@@ -237,18 +245,19 @@ def rewrap(
         lead, rest = ("", "") if blank else _leading_space(body)
 
         def wrapped(extra: str = "", **kw) -> List[str]:
-            return wrap(rest + extra, width, initial_indent=initial_indent + lead,
-                        **wrap_kwargs, **kw)
+            return wrap(
+                rest + extra, width, initial_indent=initial_indent + lead, **wrap_kwargs, **kw
+            )
 
         new = [body] if blank else wrapped()
         if max_lines is not None and (
             len(lines) + len(new) > max_lines
-            or len(lines) + len(new) == max_lines and i < len(items) - 1
+            or len(lines) + len(new) == max_lines
+            and i < len(items) - 1
         ):
             # Let wrap() cut and add the placeholder: the dummy extra line
             # guarantees the cut happens inside this paragraph.
-            lines.extend(wrapped("\n.", max_lines=max_lines - len(lines),
-                                 placeholder=placeholder))
+            lines.extend(wrapped("\n.", max_lines=max_lines - len(lines), placeholder=placeholder))
             break
         lines.extend(new)
     out = nl.join(lines)

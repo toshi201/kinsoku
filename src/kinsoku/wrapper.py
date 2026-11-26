@@ -150,8 +150,12 @@ class KinsokuWrapper(textwrap.TextWrapper):
         """Whether the first word of ``body`` fits on a line after ``indent``."""
         word = body.split(" ", 1)[0]
         kw = dict(self.extra)
-        kw.update(hanging=self.hanging, keep_all=self.keep_all,
-                  ambiguous_width=self.ambiguous_width, break_long_words=False)
+        kw.update(
+            hanging=self.hanging,
+            keep_all=self.keep_all,
+            ambiguous_width=self.ambiguous_width,
+            break_long_words=False,
+        )
         first = _wrap(word, self.width, initial_indent=indent, **kw)[0]
         return _width(first, self.ambiguous_width) <= self.width
 

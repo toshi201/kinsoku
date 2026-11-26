@@ -67,9 +67,7 @@ def _squash(s: str) -> str:
 @pytest.mark.parametrize("hanging", [False, True])
 def test_invariants(width, hanging):
     init, sub = "> ", "  "
-    whole = kinsoku.wrap(
-        TEXT, width, initial_indent=init, subsequent_indent=sub, hanging=hanging
-    )
+    whole = kinsoku.wrap(TEXT, width, initial_indent=init, subsequent_indent=sub, hanging=hanging)
     rebuilt = []
     for para in PARAS:
         lines = kinsoku.wrap(
@@ -81,7 +79,7 @@ def test_invariants(width, hanging):
         for i, line in enumerate(lines):
             indent = init if i == 0 else sub
             assert line.startswith(indent)
-            line = line[len(indent):]
+            line = line[len(indent) :]
             body.append(line)
 
             # every line fits (hangable punctuation may hang past the margin)

@@ -83,7 +83,7 @@ def _content(s):
 def _strip_indent(line, kw, first):
     ind = kw["initial_indent"] if first else kw["subsequent_indent"]
     assert line.startswith(ind)
-    return line[len(ind):]
+    return line[len(ind) :]
 
 
 def _paragraph_lines(text, kw):
@@ -92,15 +92,14 @@ def _paragraph_lines(text, kw):
         lines = wrap(para, **kw)
         for i, line in enumerate(lines):
             # visually empty lines (escapes only) get no indent (#34)
-            yield (_strip_indent(line, kw, i == 0) if strip_ansi(line) else line,
-                   i == 0)
+            yield (_strip_indent(line, kw, i == 0) if strip_ansi(line) else line, i == 0)
 
 
 # --- 1. never raises ----------------------------------------------------------
 
+
 @SETTINGS
-@given(texts(ansi=True), wrap_kwargs(),
-       st.one_of(st.none(), st.integers(1, 5)))
+@given(texts(ansi=True), wrap_kwargs(), st.one_of(st.none(), st.integers(1, 5)))
 def test_never_raises(text, kw, max_lines):
     # "…" is 2 columns with ambiguous_width=2: wider than width=1 is a
     # documented ValueError, i.e. not a valid argument combination.
@@ -111,6 +110,7 @@ def test_never_raises(text, kw, max_lines):
 
 
 # --- 2. width -----------------------------------------------------------------
+
 
 def _hang_width(content, aw):
     h = 0
@@ -142,6 +142,7 @@ def test_lines_fit_width(text, kw):
 
 # --- 3. content preservation -------------------------------------------------
 
+
 @SETTINGS
 @given(texts(ansi=True), wrap_kwargs())
 def test_content_preserved(text, kw):
@@ -172,11 +173,9 @@ def kinsoku_texts(draw):
 
 
 @SETTINGS
-@given(kinsoku_texts(), st.integers(10, 80), st.booleans(), st.booleans(),
-       st.sampled_from([1, 2]))
+@given(kinsoku_texts(), st.integers(10, 80), st.booleans(), st.booleans(), st.sampled_from([1, 2]))
 def test_kinsoku_respected(text, w, hanging, break_long_words, aw):
-    lines = wrap(text, w, hanging=hanging, break_long_words=break_long_words,
-                 ambiguous_width=aw)
+    lines = wrap(text, w, hanging=hanging, break_long_words=break_long_words, ambiguous_width=aw)
     assert "".join(lines) == text
     for line in lines:
         assert line[0] not in NO_START, lines
@@ -184,6 +183,7 @@ def test_kinsoku_respected(text, w, hanging, break_long_words, aw):
 
 
 # --- 5. ANSI transparency -----------------------------------------------------
+
 
 @SETTINGS
 @given(texts(ansi=True), wrap_kwargs())
@@ -196,9 +196,14 @@ def test_ansi_transparent(text, kw):
 
 # --- 6. truncate / pad --------------------------------------------------------
 
+
 @SETTINGS
-@given(texts(ansi=True, newlines=False), st.integers(1, 80),
-       st.sampled_from(["…", "...", ""]), st.sampled_from([1, 2]))
+@given(
+    texts(ansi=True, newlines=False),
+    st.integers(1, 80),
+    st.sampled_from(["…", "...", ""]),
+    st.sampled_from([1, 2]),
+)
 def test_truncate_fits(text, limit, placeholder, aw):
     if width(placeholder, aw) > limit:
         return
@@ -211,8 +216,12 @@ def test_truncate_fits(text, limit, placeholder, aw):
 
 
 @SETTINGS
-@given(texts(ansi=True, newlines=False), st.integers(0, 80),
-       st.sampled_from(["left", "right", "center"]), st.sampled_from([1, 2]))
+@given(
+    texts(ansi=True, newlines=False),
+    st.integers(0, 80),
+    st.sampled_from(["left", "right", "center"]),
+    st.sampled_from([1, 2]),
+)
 def test_pad_width(text, limit, align, aw):
     out = pad(text, limit, align, ambiguous_width=aw)
     assert width(out, aw) == max(limit, width(text, aw))
@@ -220,6 +229,7 @@ def test_pad_width(text, limit, align, aw):
 
 
 # --- 7. max_lines -------------------------------------------------------------
+
 
 @SETTINGS
 @given(texts(ansi=True), wrap_kwargs(), st.integers(1, 5))
@@ -242,6 +252,7 @@ def test_max_lines(text, kw, max_lines):
 
 
 # --- regression tests for bugs found by the properties above -----------------
+
 
 def test_escape_only_paragraph_gets_no_indent():
     # A paragraph made only of ANSI escapes is visually empty, like "".

@@ -1,4 +1,5 @@
 """truncate closing ANSI state (#25) and KinsokuWrapper leading spaces (#31)."""
+
 import textwrap
 
 import pytest
@@ -12,6 +13,7 @@ BEL = "\x07"
 
 # --- #25: truncate closes what is open at the cut ---------------------------
 
+
 def test_truncate_closes_osc8_with_st():
     s = f"\x1b]8;;https://example.com{ST}リンクのテキストです\x1b]8;;{ST}"
     assert kinsoku.truncate(s, 8) == f"\x1b]8;;https://example.com{ST}リンク\x1b]8;;{ST}…"
@@ -19,9 +21,7 @@ def test_truncate_closes_osc8_with_st():
 
 def test_truncate_closes_osc8_with_bel():
     s = f"\x1b]8;id=1;https://example.com{BEL}リンクのテキストです\x1b]8;;{BEL}"
-    assert kinsoku.truncate(s, 8) == (
-        f"\x1b]8;id=1;https://example.com{BEL}リンク\x1b]8;;{BEL}…"
-    )
+    assert kinsoku.truncate(s, 8) == (f"\x1b]8;id=1;https://example.com{BEL}リンク\x1b]8;;{BEL}…")
 
 
 def test_truncate_closes_sgr_and_link():
@@ -47,11 +47,14 @@ def test_truncate_open_after_cut_is_dropped():
     assert kinsoku.truncate("abcdef\x1b[31mgh\x1b[0m", 5) == "abcd…"
 
 
-@pytest.mark.parametrize("text, w, expected", [
-    ("あいうえお", 6, "あい…"),
-    ("abcdef", 4, "abc…"),
-    ("abc", 4, "abc"),
-])
+@pytest.mark.parametrize(
+    "text, w, expected",
+    [
+        ("あいうえお", 6, "あい…"),
+        ("abcdef", 4, "abc…"),
+        ("abc", 4, "abc"),
+    ],
+)
 def test_truncate_plain_text_unchanged(text, w, expected):
     assert kinsoku.truncate(text, w) == expected
 
@@ -78,6 +81,7 @@ def test_wrap_max_lines_nothing_open():
 
 
 # --- #31: KinsokuWrapper never splits the first word for its leading spaces -
+
 
 def test_issue_31_example():
     w = KinsokuWrapper(width=10, initial_indent="> ")

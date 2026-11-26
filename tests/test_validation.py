@@ -138,6 +138,7 @@ def test_table_markdown_alias():
 
 # --- a wide character in width=1 ----------------------------------------------
 
+
 def test_wide_char_overflows_width_1():
     # documented: a cluster is never split, so it gets a line of its own
     assert kinsoku.wrap("あいう", 1) == ["あ", "い", "う"]
@@ -150,6 +151,7 @@ def test_pad_does_not_cut():
 
 
 # --- tabs in pad / truncate (#41) ---------------------------------------------
+
 
 @pytest.mark.parametrize("text", ["a\tb", "日本\tc", "\t", "ab\t\tc"])
 @pytest.mark.parametrize("tabsize", [8, 4, 1])

@@ -27,6 +27,7 @@ def set_stdin(monkeypatch, data: bytes):
 
 # --- #26: multiple files -------------------------------------------------
 
+
 def test_files_without_trailing_newline_are_not_merged(tmp_path, capsys):
     a = tmp_path / "a.txt"
     b = tmp_path / "b.txt"
@@ -55,6 +56,7 @@ def test_dash_reads_stdin_between_files(tmp_path, capsys, monkeypatch):
 
 
 # --- #27: friendly errors, --encoding ------------------------------------
+
 
 def test_missing_file(tmp_path, capsys):
     missing = tmp_path / "nope.txt"
@@ -121,6 +123,7 @@ def test_help_mentions_encoding(capsys):
 
 # --- #28: width, COLUMNS, exclusive modes, --placeholder -----------------
 
+
 @pytest.mark.parametrize("w", ["0", "-3"])
 def test_non_positive_width_is_error(w, capsys, monkeypatch):
     set_stdin(monkeypatch, "あいうえお\n".encode())
@@ -139,7 +142,8 @@ def test_columns_env_is_honored(capsys, monkeypatch):
 def test_default_width_is_80_without_columns(capsys, monkeypatch):
     monkeypatch.delenv("COLUMNS", raising=False)
     monkeypatch.setattr(
-        "shutil.get_terminal_size", lambda fallback=(80, 24): __import__("os").terminal_size(fallback)
+        "shutil.get_terminal_size",
+        lambda fallback=(80, 24): __import__("os").terminal_size(fallback),
     )
     set_stdin(monkeypatch, ("あ" * 45 + "\n").encode())
     _, out, _ = run([], capsys)
@@ -162,8 +166,14 @@ def test_truncate_and_width_of_are_exclusive(capsys):
 @pytest.mark.parametrize("mode", ["--truncate", "--width-of"])
 @pytest.mark.parametrize(
     "opt",
-    [["--hanging"], ["-n", "2"], ["--keep-all"], ["--no-break-long-words"],
-     ["-i", "　"], ["-s", "  "]],
+    [
+        ["--hanging"],
+        ["-n", "2"],
+        ["--keep-all"],
+        ["--no-break-long-words"],
+        ["-i", "　"],
+        ["-s", "  "],
+    ],
 )
 def test_wrap_only_options_rejected_in_other_modes(mode, opt, capsys):
     code, _, err = run_err([mode, *opt], capsys)
@@ -214,8 +224,7 @@ def test_tategaki_is_exclusive_with_other_modes(tmp_path, capsys, other):
 def test_unwrap_rewrap_truncate_are_exclusive(tmp_path, capsys):
     f = tmp_path / "a.txt"
     f.write_text("あいう\n", encoding="utf-8")
-    for combo in (["--unwrap", "--rewrap"], ["--rewrap", "--truncate"],
-                  ["--unwrap", "--width-of"]):
+    for combo in (["--unwrap", "--rewrap"], ["--rewrap", "--truncate"], ["--unwrap", "--width-of"]):
         with pytest.raises(SystemExit) as e:
             main([*combo, str(f)])
         assert e.value.code == 2
@@ -224,8 +233,15 @@ def test_unwrap_rewrap_truncate_are_exclusive(tmp_path, capsys):
 
 @pytest.mark.parametrize(
     "opt",
-    [["-n", "2"], ["-i", "　"], ["-s", "　"], ["--keep-all"],
-     ["--no-break-long-words"], ["--hanging"], ["--placeholder", "..."]],
+    [
+        ["-n", "2"],
+        ["-i", "　"],
+        ["-s", "　"],
+        ["--keep-all"],
+        ["--no-break-long-words"],
+        ["--hanging"],
+        ["--placeholder", "..."],
+    ],
 )
 def test_tategaki_rejects_wrap_only_options(tmp_path, capsys, opt):
     f = tmp_path / "a.txt"

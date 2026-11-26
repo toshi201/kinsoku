@@ -68,8 +68,15 @@ def test_option_table_covers_every_option():
 
 # accepted in every mode, or select the mode themselves
 NOT_MODE_DEPENDENT = {
-    "--help", "--version", "--encoding",
-    "--truncate", "--width-of", "--tategaki", "--table", "--unwrap", "--rewrap",
+    "--help",
+    "--version",
+    "--encoding",
+    "--truncate",
+    "--width-of",
+    "--tategaki",
+    "--table",
+    "--unwrap",
+    "--rewrap",
 }
 
 
@@ -83,6 +90,7 @@ def test_every_cli_option_is_classified(capsys):
 
 
 # --- #47: rejected combinations ----------------------------------------------
+
 
 @pytest.mark.parametrize("mode,dest", REJECTED, ids=[f"{m or 'wrap'}:{d}" for m, d in REJECTED])
 def test_rejected_combination(mode, dest, capsys, monkeypatch):
@@ -107,8 +115,19 @@ def test_allowed_combination(mode, dest, capsys, monkeypatch):
 def test_defaults_are_never_rejected(mode, capsys, monkeypatch):
     # explicitly passing a default value counts as "not given"
     set_stdin(monkeypatch, "あいう\n".encode())
-    argv = [*MODES[mode], "--rules", "ja", "--ambiguous-width", "1",
-            "--tabsize", "8", "--style", "simple", "--ruby-width", "full"]
+    argv = [
+        *MODES[mode],
+        "--rules",
+        "ja",
+        "--ambiguous-width",
+        "1",
+        "--tabsize",
+        "8",
+        "--style",
+        "simple",
+        "--ruby-width",
+        "full",
+    ]
     assert main(argv) == 0
 
 
@@ -132,6 +151,7 @@ def test_gap_message_is_unchanged(capsys, monkeypatch):
 
 # --- #47: combinations that now do something ---------------------------------
 
+
 def test_tategaki_ruby_strips_annotations(capsys, monkeypatch):
     set_stdin(monkeypatch, "｜吾輩《わがはい》は猫である。\n".encode())
     assert main(["--tategaki", "6", "--ruby"]) == 0
@@ -147,8 +167,9 @@ def main_out(argv, text, capsys, monkeypatch):
 
 
 def test_table_rules_still_allowed(capsys, monkeypatch):
-    out = main_out(["--table", "--rules", "zh-hans", "-w", "20"], "a,b\n你好,世界\n",
-                   capsys, monkeypatch)
+    out = main_out(
+        ["--table", "--rules", "zh-hans", "-w", "20"], "a,b\n你好,世界\n", capsys, monkeypatch
+    )
     assert "你好" in out
 
 
@@ -159,6 +180,7 @@ def test_truncate_tabsize_is_used(capsys, monkeypatch):
 
 
 # --- #48: BOM -----------------------------------------------------------------
+
 
 def test_bom_csv_header(tmp_path, capsys):
     f = tmp_path / "bom.csv"
@@ -219,11 +241,14 @@ def test_other_encoding_is_respected(tmp_path, capsys):
 
 # --- review of #53: --rewrap accepts --ruby / --ruby-width --------------------
 
-RUBY_TEXT = " ｜吾輩《わがはい》は猫である。名前は\nまだ無い。どこで生れたかとんと\n見当がつかぬ。\n"
+RUBY_TEXT = (
+    " ｜吾輩《わがはい》は猫である。名前は\nまだ無い。どこで生れたかとんと\n見当がつかぬ。\n"
+)
 
 
 def test_rewrap_ruby_keeps_annotations_whole(capsys, monkeypatch):
     import kinsoku
+
     # Wide enough for the indented ruby unit: the notation stays whole.
     out = main_out(["--rewrap", "-w", "19", "--ruby"], RUBY_TEXT, capsys, monkeypatch)
     assert out.splitlines()[0] == " ｜吾輩《わがはい》"
@@ -232,6 +257,7 @@ def test_rewrap_ruby_keeps_annotations_whole(capsys, monkeypatch):
 
 def test_rewrap_ruby_never_splits_notation(capsys, monkeypatch):
     import kinsoku
+
     # Too narrow for the ruby unit: without --ruby the notation is cut
     # mid-way; with --ruby it is never cut (an over-wide unit drops its
     # annotation and wraps the base text instead, see #51).
@@ -246,15 +272,19 @@ def test_rewrap_ruby_never_splits_notation(capsys, monkeypatch):
 
 def test_rewrap_ruby_width_is_passed(capsys, monkeypatch):
     import kinsoku
-    out = main_out(["--rewrap", "-w", "12", "--ruby", "--ruby-width", "base"],
-                   RUBY_TEXT, capsys, monkeypatch)
+
+    out = main_out(
+        ["--rewrap", "-w", "12", "--ruby", "--ruby-width", "base"], RUBY_TEXT, capsys, monkeypatch
+    )
     assert out == kinsoku.rewrap(RUBY_TEXT, 12, ruby=True, ruby_width="base")
 
 
 # --- #54: --cjk-latin-space only with --unwrap / --rewrap ---------------------
 
-@pytest.mark.parametrize("mode", ["", "--truncate", "--width-of", "--tategaki", "--table"],
-                         ids=lambda m: m or "wrap")
+
+@pytest.mark.parametrize(
+    "mode", ["", "--truncate", "--width-of", "--tategaki", "--table"], ids=lambda m: m or "wrap"
+)
 def test_cjk_latin_space_rejected_elsewhere(mode, capsys, monkeypatch):
     set_stdin(monkeypatch, "あいう\n".encode())
     code, out, err = run_err([*MODES[mode], "--cjk-latin-space"], capsys)
@@ -268,6 +298,8 @@ def test_cjk_latin_space_rejected_elsewhere(mode, capsys, monkeypatch):
 @pytest.mark.parametrize("mode", ["--unwrap", "--rewrap"])
 def test_cjk_latin_space_is_used(mode, capsys, monkeypatch):
     text = "日本語と\nEnglish\nの混在\n"
-    assert main_out([mode, "--cjk-latin-space"], text, capsys, monkeypatch) \
+    assert (
+        main_out([mode, "--cjk-latin-space"], text, capsys, monkeypatch)
         == "日本語と English の混在\n"
+    )
     assert main_out([mode], text, capsys, monkeypatch) == "日本語とEnglishの混在\n"
