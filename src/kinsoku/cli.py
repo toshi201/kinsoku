@@ -12,6 +12,7 @@ import sys
 
 from . import __version__
 from ._core import PRESETS, fill, strip_ruby, truncate, width
+from .encoding import _decode_auto
 from .table import STYLES, table
 from .tategaki import tategaki
 from .unwrap import rewrap, unwrap
@@ -53,8 +54,23 @@ def _input_encoding(encoding: str) -> str:
     return "utf-8-sig" if codecs.lookup(encoding).name == "utf-8" else encoding
 
 
-def _read_input(path: str, encoding: str) -> str:
-    """Read one input ("-" is stdin). Raises OSError / UnicodeDecodeError."""
+def _read_input(path: str, encoding: str) -> tuple[str, str | None]:
+    """Read one input ("-" is stdin): ``(text, detected encoding)``.
+
+    The detected encoding is None unless ``encoding`` is "auto" (#78).
+    Raises OSError / UnicodeDecodeError.
+    """
+    if encoding == "auto":
+        if path == "-":
+            buf = getattr(sys.stdin, "buffer", None)
+            if buf is None:  # e.g. replaced by a StringIO: already text
+                return sys.stdin.read().removeprefix("\ufeff"), None
+            data: bytes = buf.read()
+            return _decode_auto(data)
+        with open(path, "rb") as f:
+            text, detected = _decode_auto(f.read())
+        # the same newline handling as open() in text mode
+        return text.replace("\r\n", "\n").replace("\r", "\n"), detected
     encoding = _input_encoding(encoding)
     if path == "-":
         buf = getattr(sys.stdin, "buffer", None)
@@ -62,11 +78,11 @@ def _read_input(path: str, encoding: str) -> str:
             text = sys.stdin.read()
             if encoding == "utf-8-sig" and text.startswith("\ufeff"):
                 text = text[1:]
-            return text
-        data: bytes = buf.read()
-        return data.decode(encoding)
+            return text, None
+        data = buf.read()
+        return data.decode(encoding), None
     with open(path, encoding=encoding) as f:
-        return f.read()
+        return f.read(), None
 
 
 # Mode-dependent options: (flag, dest, default). An option still at its
@@ -313,13 +329,19 @@ def _main(argv: list[str] | None) -> int:
         "--encoding",
         default="utf-8",
         help="input encoding (default: utf-8, a leading BOM is removed; e.g. cp932 / shift_jis "
-        "for Aozora Bunko texts)",
+        "for Aozora Bunko texts; auto: detect UTF-8 / UTF-16 BOM / cp932 / euc-jp per input)",
     )
     p.add_argument(
         "--cjk-latin-space",
         action="store_true",
         help="with --unwrap/--rewrap: put a space where CJK meets "
         "latin text or digits at a line break",
+    )
+    p.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="with --encoding auto: report the detected encoding of each input on stderr",
     )
     p.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
     args = p.parse_args(argv)
@@ -339,17 +361,26 @@ def _main(argv: list[str] | None) -> int:
         if args.gap is not None and args.gap < 0:
             p.error("--gap must be >= 0")
     placeholder = "…" if args.placeholder is None else args.placeholder
-    try:
-        codecs.lookup(args.encoding)
-    except LookupError:
-        p.error(f"unknown encoding: {args.encoding}")
+    if args.encoding.lower() == "auto":
+        args.encoding = "auto"
+    else:
+        try:
+            codecs.lookup(args.encoding)
+        except LookupError:
+            p.error(f"unknown encoding: {args.encoding}")
 
     chunks = []
     for path in args.files or ["-"]:
         name = "<stdin>" if path == "-" else path
         try:
-            chunk = _read_input(path, args.encoding)
+            chunk, detected = _read_input(path, args.encoding)
         except UnicodeDecodeError:
+            if args.encoding == "auto":
+                p.exit(
+                    1,
+                    f"{p.prog}: error: {name}: cannot detect the encoding "
+                    "(not UTF-8, cp932 or euc-jp; try --encoding)\n",
+                )
             p.exit(
                 1,
                 f"{p.prog}: error: {name}: cannot decode as "
@@ -357,6 +388,8 @@ def _main(argv: list[str] | None) -> int:
             )
         except OSError as e:
             p.exit(1, f"{p.prog}: error: {name}: {e.strerror or e}\n")
+        if args.verbose and detected is not None:
+            sys.stderr.write(f"{p.prog}: detected encoding: {detected} ({name})\n")
         # Each file is its own block: a missing final newline must not
         # glue the last line to the next file's first line.
         if chunk and not chunk.endswith("\n"):

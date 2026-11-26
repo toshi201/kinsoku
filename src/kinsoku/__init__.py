@@ -18,6 +18,7 @@ from ._core import (
     width,
     wrap,
 )
+from .encoding import detect_encoding
 from .table import table
 from .tategaki import tategaki
 from .unwrap import rewrap, unwrap
@@ -31,6 +32,7 @@ __all__ = [
     "PRESETS",
     "ansi_reflow",
     "char_width",
+    "detect_encoding",
     "fill",
     "pad",
     "rewrap",
