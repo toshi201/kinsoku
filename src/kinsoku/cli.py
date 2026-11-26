@@ -22,6 +22,32 @@ def _default_width() -> int:
     return shutil.get_terminal_size((80, 24)).columns
 
 
+def _table_default_width(style: str) -> int | None:
+    """Width cap for ``--table`` when ``-w`` is omitted (#68).
+
+    * ``markdown``: no cap. The output is meant to be saved and rendered
+      elsewhere, and ``<br>`` joins never line up in a terminal anyway.
+    * ``COLUMNS`` set to a positive integer: that value.
+    * stdout is a terminal: the terminal width.
+    * otherwise (pipe or redirect): no cap, the same as before #68.
+    """
+    if style == "markdown":
+        return None
+    try:
+        columns = int(os.environ.get("COLUMNS", ""))
+    except ValueError:
+        columns = 0
+    if columns > 0:
+        return columns
+    try:
+        tty = sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        tty = False
+    if tty:
+        return shutil.get_terminal_size((80, 24)).columns
+    return None
+
+
 def _input_encoding(encoding: str) -> str:
     """UTF-8 input is read as utf-8-sig so that a leading BOM is dropped."""
     return "utf-8-sig" if codecs.lookup(encoding).name == "utf-8" else encoding
@@ -253,7 +279,9 @@ def _main(argv: list[str] | None) -> int:
     mode.add_argument(
         "--table",
         action="store_true",
-        help="format CSV/TSV input as a table (-w is the total width budget; -w 0: no limit)",
+        help="format CSV/TSV input as a table (-w is the total width budget; -w 0: no limit; "
+        "-w omitted: $COLUMNS or the terminal width when stdout is a tty, else no limit; "
+        "markdown: no limit unless -w is given)",
     )
     p.add_argument(
         "--gap", type=int, default=None, help="with --tategaki: spaces between columns (default: 1)"
@@ -347,8 +375,11 @@ def _main(argv: list[str] | None) -> int:
         print(out)
         return 0
     if args.table:
-        # -w omitted: the terminal width caps the table like plain wrapping
-        return _table(p, args, text, None if args.width == 0 else w)
+        if args.width is None:
+            tw = _table_default_width(args.style)
+        else:
+            tw = None if args.width == 0 else args.width
+        return _table(p, args, text, tw)
     if args.width_of:
         for line in text.splitlines():
             print(width(line, args.ambiguous_width, tabsize=args.tabsize))

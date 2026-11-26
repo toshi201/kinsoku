@@ -180,3 +180,66 @@ def test_width_zero_is_still_an_error_outside_table(mode, capsys):
         main([*mode, "-w", "0"])
     assert ei.value.code == 2
     assert "width must be > 0" in capsys.readouterr().err
+
+
+LONG = "赤くて甘い果物。青森県が有名で、ふじという品種が人気"
+
+
+def _table_piped(argv, tmp_path, columns=None):
+    """Run --table in a subprocess with stdout as a pipe (not a tty)."""
+    f = tmp_path / "a.csv"
+    f.write_text(CSV, encoding="utf-8")
+    env = _env()
+    env.pop("COLUMNS", None)
+    if columns is not None:
+        env["COLUMNS"] = columns
+    r = subprocess.run(
+        [sys.executable, "-m", "kinsoku", "--table", *argv, str(f)],
+        capture_output=True,
+        env=env,
+    )
+    return r.returncode, r.stdout.decode("utf-8"), r.stderr.decode("utf-8")
+
+
+@pytest.mark.parametrize("style", ["simple", "grid", "plain"])
+def test_table_piped_without_columns_has_no_limit(style, tmp_path):
+    code, out, err = _table_piped(["--style", style], tmp_path)
+    assert code == 0, err
+    assert LONG in out
+
+
+@pytest.mark.parametrize("columns", [None, "30"])
+def test_table_markdown_is_not_wrapped_without_w(columns, tmp_path):
+    code, out, err = _table_piped(["--style", "markdown"], tmp_path, columns)
+    assert code == 0, err
+    assert "<br>" not in out
+    assert LONG in out
+    assert len(out.splitlines()) == 3
+
+
+def test_table_markdown_explicit_width_still_wraps(tmp_path):
+    code, out, err = _table_piped(["--style", "markdown", "-w", "30"], tmp_path)
+    assert code == 0, err
+    assert "<br>" in out
+
+
+def test_table_piped_with_columns_is_capped(tmp_path):
+    code, out, err = _table_piped([], tmp_path, "30")
+    assert code == 0, err
+    lines = out.splitlines()
+    assert len(lines) > 3
+    assert max(width(line) for line in lines) <= 30
+
+
+def test_table_tty_uses_terminal_width(monkeypatch, capsys, tmp_path):
+    f = tmp_path / "a.csv"
+    f.write_text(CSV, encoding="utf-8")
+    monkeypatch.delenv("COLUMNS", raising=False)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(
+        "kinsoku.cli.shutil.get_terminal_size", lambda fallback=(80, 24): os.terminal_size((30, 24))
+    )
+    assert main(["--table", str(f)]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) > 3
+    assert max(width(line) for line in lines) <= 30
