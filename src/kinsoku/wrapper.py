@@ -37,7 +37,7 @@ from __future__ import annotations
 import textwrap
 from typing import Any
 
-from ._core import _check_ambiguous_width, _check_width, _expand_tabs
+from ._core import _check_ambiguous_width, _check_width, _expand_tabs, strip_ruby
 from ._core import width as _width
 from ._core import wrap as _wrap
 
@@ -157,7 +157,14 @@ class KinsokuWrapper(textwrap.TextWrapper):
             break_long_words=False,
         )
         first = _wrap(word, self.width, initial_indent=indent, **kw)[0]
-        return _width(first, self.ambiguous_width) <= self.width
+        if _width(first, self.ambiguous_width) <= self.width:
+            return True
+        if self.break_long_words and kw.get("ruby") and "《" in word:
+            # a ruby notation that does not fit loses its ruby (#51, #59):
+            # measure the word as its base text, as wrap() will lay it out
+            first = _wrap(strip_ruby(word), self.width, initial_indent=indent, **kw)[0]
+            return _width(first, self.ambiguous_width) <= self.width
+        return False
 
     def _keep_lead(self, indent: str, lead: str, body: str) -> bool:
         """Decide whether the leading whitespace ``lead`` moves into the indent.
