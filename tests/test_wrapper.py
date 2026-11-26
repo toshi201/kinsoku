@@ -89,7 +89,8 @@ def test_expand_tabs_per_line():
 
 def test_expand_tabs_false():
     w = KinsokuWrapper(40, expand_tabs=False, replace_whitespace=False)
-    assert w.wrap("a\tb") == ["a\tb"]
+    # kinsoku.wrap() itself expands remaining tabs by display width (#29)
+    assert w.wrap("a\tb") == ["a       b"]
     # with replace_whitespace each tab becomes a single space (like textwrap)
     assert KinsokuWrapper(40, expand_tabs=False).wrap("a\tb") == ["a b"]
 

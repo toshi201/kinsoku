@@ -76,6 +76,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--ruby-width", choices=("base", "full"), default="full",
                    help="with --ruby: count only the base text (base) or the "
                         "whole notation (full, default)")
+    p.add_argument("--tabsize", type=int, default=8,
+                   help="expand tabs to multiples of N columns (default: 8)")
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--truncate", action="store_true",
                    help="truncate each line with … instead of wrapping")
@@ -163,7 +165,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return _table(p, args, text)
     if args.width_of:
         for line in text.splitlines():
-            print(width(line, args.ambiguous_width))
+            print(width(line, args.ambiguous_width, tabsize=args.tabsize))
         return 0
     if args.truncate:
         try:
@@ -191,6 +193,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 ambiguous_width=args.ambiguous_width,
                 rules=args.rules,
                 ansi_reflow=args.ansi_reflow,
+                tabsize=args.tabsize,
             )
         except ValueError as e:
             p.error(str(e))
@@ -213,6 +216,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             ansi_reflow=args.ansi_reflow,
             ruby=args.ruby,
             ruby_width=args.ruby_width,
+            tabsize=args.tabsize,
         )
     except ValueError as e:
         p.error(str(e))
