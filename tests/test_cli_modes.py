@@ -42,6 +42,7 @@ OPTION_ARGV = {
     "no_header": ["--no-header"],
     "style": ["--style", "grid"],
     "placeholder": ["--placeholder", "..."],
+    "phrase": ["--phrase"],
 }
 FLAG = {dest: opt for opt, dest, _ in _OPTIONS}
 

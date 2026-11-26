@@ -92,6 +92,7 @@ _OPTIONS = (
     ("--no-header", "no_header", False),
     ("--style", "style", "simple"),
     ("--placeholder", "placeholder", None),
+    ("--phrase", "phrase", False),
 )
 
 _WRAP_OPTS = frozenset(
@@ -114,7 +115,7 @@ _WRAP_OPTS = frozenset(
 # The options each mode accepts ("" is plain wrapping). --encoding and the
 # input files are accepted everywhere.
 _MODE_OPTIONS = {
-    "": _WRAP_OPTS | {"ruby", "ruby_width"},
+    "": _WRAP_OPTS | {"ruby", "ruby_width", "phrase"},
     "--truncate": frozenset({"width", "placeholder", "ambiguous_width", "tabsize"}),
     "--width-of": frozenset({"ambiguous_width", "tabsize"}),
     # --ruby: the ruby annotations are removed (strip_ruby) before layout
@@ -139,6 +140,7 @@ _MODE_OPTIONS = {
         "ruby_width",
         "indent_marks_paragraph",
         "cjk_latin_space",
+        "phrase",
     },
 }
 
@@ -321,6 +323,12 @@ def _main(argv: list[str] | None) -> int:
         help="with --unwrap/--rewrap: put a space where CJK meets "
         "latin text or digits at a line break",
     )
+    p.add_argument(
+        "--phrase",
+        action="store_true",
+        help="(experimental) prefer breaking at phrase-like positions (文節), "
+        "so that words are cut less often",
+    )
     p.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
     args = p.parse_args(argv)
 
@@ -427,6 +435,7 @@ def _main(argv: list[str] | None) -> int:
                 tabsize=args.tabsize,
                 ruby=args.ruby,
                 ruby_width=args.ruby_width,
+                phrase=args.phrase,
             )
         except ValueError as e:
             p.error(str(e))
@@ -450,6 +459,7 @@ def _main(argv: list[str] | None) -> int:
             ruby=args.ruby,
             ruby_width=args.ruby_width,
             tabsize=args.tabsize,
+            phrase=args.phrase,
         )
     except ValueError as e:
         p.error(str(e))

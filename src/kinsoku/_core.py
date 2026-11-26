@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import html
+import operator
 import re
 import unicodedata
 from bisect import bisect_right
@@ -881,7 +882,10 @@ def _atoms(
     An ASCII opening bracket ``(`` ``[`` ``{`` right after an ASCII word
     character, and its matching closing bracket, stay inside the word too
     (``print(x)``, ``a[0]``, ``foo.bar.baz()``); a bracket before a word
-    (``(see above)``, ``言った(笑)``) is an atom as before.
+    (``(see above)``, ``言った(笑)``) is an atom as before.  So is a bracket
+    whose contents (up to the matching closing bracket, or the end of the
+    line) are not all ASCII (``API(エーピーアイ)``, #73): a line may break
+    before it.
     Halfwidth katakana are atoms of their own, like wide kana, and the
     halfwidth sound marks ``ﾞ`` ``ﾟ`` always stick to the preceding cluster.
 
@@ -934,7 +938,18 @@ def _atoms(
         src = list(src)
         qdec = iter(_quote_kinds(src, rmode, qs, no_start, no_end))
 
-    for cl in src:
+    # opening brackets with non-ASCII contents (#73): indices into src
+    wide_open: frozenset[int] = frozenset()
+    n_src = 0
+    if not keep_all and _word_bracket(text):
+        src = list(src)
+        wide_open = _non_ascii_brackets(src, rmode)
+        n_src = len(src)
+    # the index of the current item is only needed at a bracket: it is
+    # worked out from the iterator then, rather than counted on every item
+    it = iter(src)
+
+    for cl in it:
         # The width of a word run is the sum of its cluster widths, so each
         # cluster is measured exactly once.
         if rmode:
@@ -967,7 +982,13 @@ def _atoms(
                     atoms[-1].width += w
                 else:
                     append(_Unit(cl, w))
-            elif b in brackets and bw == 1 and not pend and _last_base(word) in word_end:
+            elif (
+                b in brackets
+                and bw == 1
+                and not pend
+                and _last_base(word) in word_end
+                and not (wide_open and n_src - operator.length_hint(it) - 1 in wide_open)
+            ):
                 # ``foo(``: the bracket is part of the word (#65)
                 opened.append(brackets[b])
                 word.append(cl)
@@ -1012,6 +1033,61 @@ def _atoms(
     if word or pend:
         flush()
     return atoms
+
+
+# an ASCII opening bracket that may be kept in the word before it (#65),
+# with escapes or combining marks in between: see :func:`_word_bracket`
+_WORD_BRACKET_RE = re.compile(
+    r"[0-9A-Za-z_)\]}](?:" + _ANSI_RE.pattern + r"|[\u0300-\u036f\u200c\u200d\ufe00-\ufe0f])*[(\[{]"
+)
+_BEFORE_WORD_BRACKET = _WORD_END | frozenset("\u200c\u200d")
+
+
+def _word_bracket(text: str) -> bool:
+    """Whether :func:`_atoms` may keep an ASCII opening bracket in ``text`` in
+    the word before it (a superset), so that it must look at the contents."""
+    if "\x1b" in text:
+        return _WORD_BRACKET_RE.search(text) is not None
+    before = _BEFORE_WORD_BRACKET
+    for ch in "([{":
+        i = text.find(ch, 1)
+        while i > 0:
+            p = text[i - 1]
+            if p in before or "\u0300" <= p <= "\u036f" or "\ufe00" <= p <= "\ufe0f":
+                return True
+            i = text.find(ch, i + 1)
+    return False
+
+
+def _non_ascii_brackets(items: list[Any], rmode: bool) -> frozenset[int]:
+    """Indices of ASCII opening brackets in ``items`` (clusters or ruby
+    items) whose contents are not all ASCII (#73).
+
+    The contents run up to the matching closing bracket, or to the end of
+    the line when there is none.  Escape-only clusters do not count.
+    """
+    bases = [it[2] if rmode else it if len(it) == 1 else _base(it) for it in items]
+    n = len(bases)
+    # nxt[i]: index of the first non-ASCII base at or after i (n if none)
+    nxt = [n] * (n + 1)
+    for i in range(n - 1, -1, -1):
+        b = bases[i]
+        nxt[i] = i if b and b[0] >= "\x80" else nxt[i + 1]
+    if nxt[0] == n:
+        return frozenset()
+    out = set()
+    stack: list[tuple[str, int]] = []  # (expected closer, index of opener)
+    for i, b in enumerate(bases):
+        if b in _BRACKETS:
+            stack.append((_BRACKETS[b], i))
+        elif b in _CLOSERS and stack and stack[-1][0] == b:
+            j = stack.pop()[1]
+            if nxt[j] < i:
+                out.add(j)
+    for _, j in stack:  # unclosed: the contents run to the end
+        if nxt[j] < n:
+            out.add(j)
+    return frozenset(out)
 
 
 _SENTENCE_END = frozenset("。！？．")
@@ -1307,6 +1383,102 @@ def _join_sound_marks(cls: list[str], ws: list[int]) -> tuple[list[str], list[in
     return out_c, out_w
 
 
+# --- phrase=True: prefer breaks at phrase-like positions (#77) ---------------
+
+_P_OTHER, _P_HIRA, _P_KATA, _P_KANJI, _P_ALNUM, _P_CONT = range(6)
+# characters that continue the previous one: never break before them
+_P_CONTINUE = frozenset("ー々〻ゝゞヽヾ゛゜ｰﾞﾟ")
+# particles: a break may follow them (``東京は|ここ``)
+_PARTICLES_1 = frozenset("はがをにでとのもへや")
+_PARTICLES_2 = frozenset(("から", "まで", "より", "など", "だけ", "しか"))
+# hiragana that often continue a particle (``東京で|は`` is not a phrase end)
+_P_NOT_AFTER_PARTICLE = frozenset("はがをにでとのもへやかよねぞさ")
+
+
+def _p_class(ch: str) -> int:
+    if not ch:
+        return _P_OTHER
+    if ch in _P_CONTINUE:
+        return _P_CONT
+    o = ord(ch)
+    if 0x3041 <= o <= 0x309F:
+        return _P_HIRA
+    if 0x30A0 <= o <= 0x30FF or 0x31F0 <= o <= 0x31FF or 0xFF66 <= o <= 0xFF9D:
+        return _P_KATA
+    if 0x3400 <= o <= 0x4DBF or 0x4E00 <= o <= 0x9FFF or 0xF900 <= o <= 0xFAFF or ch in "〆〇ヶ":
+        return _P_KANJI
+    if ch.isascii() and ch.isalnum():
+        return _P_ALNUM
+    if 0xFF10 <= o <= 0xFF19 or 0xFF21 <= o <= 0xFF3A or 0xFF41 <= o <= 0xFF5A:
+        return _P_ALNUM
+    return _P_OTHER
+
+
+def _phrase_break(before: str, after: str) -> bool:
+    """Whether a break between ``before`` (the visible text up to the break,
+    at least its last three characters) and the character ``after`` looks
+    like a phrase boundary.
+
+    * a change of script (kanji, katakana, ASCII letters and digits) is a
+      boundary, except into hiragana (okurigana and particles: ``東京|は``,
+      ``食|べる``) and before ``ー`` ``々`` and the like;
+    * the end of a common particle after a non-hiragana character
+      (``東京は|いま``, ``大阪から|きた``) is one, unless another hiragana
+      that often follows a particle comes next (``東京で|は``);
+    * next to punctuation and other symbols, every break is a boundary.
+    """
+    if not before or not after:
+        return True
+    a = _p_class(after)
+    if a == _P_CONT:
+        return False
+    b = _p_class(before[-1])
+    if b == _P_OTHER or a == _P_OTHER:
+        return True
+    if a != _P_HIRA:
+        return a != b and b != _P_CONT or (b == _P_CONT and a == _P_KANJI)
+    if b != _P_HIRA or after in _P_NOT_AFTER_PARTICLE:
+        return False
+    if before[-1] in _PARTICLES_1 and _p_class(before[-2:-1]) not in (_P_HIRA, _P_OTHER):
+        return True
+    return before[-2:] in _PARTICLES_2 and _p_class(before[-3:-2]) not in (_P_HIRA, _P_OTHER)
+
+
+def _visible_text(text: str) -> str:
+    return strip_ansi(text) if "\x1b" in text else text
+
+
+def _phrase_tail(cur: list[_Unit], nxt: _Unit) -> int:
+    """Index in ``cur`` to break before so that the line ends at a phrase
+    boundary (#77); ``len(cur)`` when the break before ``nxt`` is one
+    already, ``0`` when ``cur`` has no boundary."""
+    n = len(cur)
+    if cur[-1].space or nxt.space:
+        return n
+    tail = _visible_text(cur[-1].text)
+    k = n - 1
+    while len(tail) < 3 and k > 0 and not cur[k - 1].space:
+        k -= 1
+        tail = _visible_text(cur[k].text) + tail
+    if _phrase_break(tail, _first(nxt.text)):
+        return n
+    for k in range(n - 1, 0, -1):
+        u = cur[k]
+        if u.space:
+            continue
+        prev = cur[k - 1]
+        if prev.space:
+            return k
+        before = _visible_text(prev.text)
+        j = k - 1
+        while len(before) < 3 and j > 0 and not cur[j - 1].space:
+            j -= 1
+            before = _visible_text(cur[j].text) + before
+        if _phrase_break(before, _first(u.text)):
+            return k
+    return 0
+
+
 def _wrap_line(
     line: str,
     first_width: int,
@@ -1318,6 +1490,7 @@ def _wrap_line(
     rules: KinsokuRules = _JA,
     ruby: bool = False,
     ruby_width: str = "full",
+    phrase: bool = False,
 ) -> list[str]:
     units = _glue(
         _atoms(line, ambiguous_width, keep_all, rules, ruby, ruby_width),
@@ -1418,6 +1591,18 @@ def _wrap_line(
                 cur = [u]
                 cur_w = u.width
                 continue
+        if phrase and cur and u.width - u.hang <= rest_width:
+            k = _phrase_tail(cur, u)
+            if 0 < k < len(cur) and any(not x.space for x in cur[:k]):
+                moved = cur[k:]
+                moved_w = sum(x.width for x in moved)
+                # keep at least half of the line, so lines do not get ragged
+                if 2 * (cur_w - moved_w) >= limit() and moved_w + u.width - u.hang <= rest_width:
+                    cur = cur[:k]
+                    flush()
+                    cur = [*moved, u]
+                    cur_w = moved_w + u.width
+                    continue
         if cur:
             flush()
         if break_long_words and u.width - u.hang > limit():
@@ -1464,6 +1649,7 @@ def wrap(
     ruby: bool = False,
     ruby_width: str = "full",
     tabsize: int = 8,
+    phrase: bool = False,
 ) -> list[str]:
     """Wrap ``text`` so every line fits in ``width`` terminal columns.
 
@@ -1516,6 +1702,16 @@ def wrap(
         ``expand_tabs=True`` (its default), with its own ``tabsize``; with
         ``expand_tabs=False`` any remaining tabs are expanded here with
         ``tabsize=8``.
+    :param phrase: (experimental) prefer breaking at phrase-like positions
+        (文節), so that words are cut less often (``東京|都`` ->
+        ``東京都``): a change of script (kanji, katakana, latin letters and
+        digits; not into hiragana) and the end of a common particle
+        (``は`` ``を`` ``から`` ...) after a non-hiragana character.  When a
+        line ends elsewhere, the text after the last such position moves to
+        the next line, if it fits there; with no such position on the line,
+        it breaks between any characters as usual.  Lines never get wider
+        than ``width``, and kinsoku still applies.  A light heuristic, not a
+        dictionary or a model: the rules may change in later versions.
 
     A grapheme cluster is never split, so one that is wider than the room on
     a line (a wide character such as ``"あ"`` with ``width=1``) is put on a
@@ -1555,6 +1751,7 @@ def wrap(
             rules,
             ruby,
             ruby_width,
+            phrase,
         )
         # an escape-only line is visually empty, like "": no indent (#34)
         first = wrapped[0]
