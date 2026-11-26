@@ -3,24 +3,45 @@
 from __future__ import annotations
 
 import argparse
+import codecs
 import csv
 import io
-import os
+import shutil
 import sys
 from typing import List, Optional
 
 from . import __version__
 from ._core import PRESETS, fill, truncate, width
+from .table import STYLES, table
 from .tategaki import tategaki
 from .unwrap import rewrap, unwrap
-from .table import STYLES, table
 
 
 def _default_width() -> int:
-    try:
-        return os.get_terminal_size().columns
-    except OSError:
-        return 80
+    # COLUMNS env var -> terminal size of stdout -> 80
+    return shutil.get_terminal_size((80, 24)).columns
+
+
+def _read_input(path: str, encoding: str) -> str:
+    """Read one input ("-" is stdin). Raises OSError / UnicodeDecodeError."""
+    if path == "-":
+        buf = getattr(sys.stdin, "buffer", None)
+        if buf is None:  # e.g. replaced by a StringIO
+            return sys.stdin.read()
+        return buf.read().decode(encoding)
+    with open(path, encoding=encoding) as f:
+        return f.read()
+
+
+# Options that only make sense when wrapping (dest, default).
+_WRAP_ONLY = (
+    ("--hanging", "hanging", False),
+    ("--no-break-long-words", "no_break_long_words", False),
+    ("--keep-all", "keep_all", False),
+    ("--indent", "indent", ""),
+    ("--subsequent-indent", "subsequent_indent", ""),
+    ("--max-lines", "max_lines", None),
+)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -28,9 +49,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         prog="kinsoku",
         description="Wrap Japanese/CJK text by display width with kinsoku shori.",
     )
-    p.add_argument("files", nargs="*", help="input files (default: stdin)")
+    p.add_argument("files", nargs="*",
+                   help="input files; '-' is stdin (default: stdin)")
     p.add_argument("-w", "--width", type=int, default=None,
-                   help="max columns per line (default: terminal width or 80)")
+                   help="max columns per line (default: $COLUMNS, terminal width, or 80)")
     p.add_argument("--hanging", action="store_true",
                    help="let 、。,. hang past the margin (ぶら下げ)")
     p.add_argument("--no-break-long-words", action="store_true",
@@ -54,22 +76,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--ruby-width", choices=("base", "full"), default="full",
                    help="with --ruby: count only the base text (base) or the "
                         "whole notation (full, default)")
-    p.add_argument("--truncate", action="store_true",
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--truncate", action="store_true",
                    help="truncate each line with … instead of wrapping")
-    p.add_argument("--width-of", action="store_true",
+    mode.add_argument("--width-of", action="store_true",
                    help="print the display width of each input line")
-    p.add_argument("--tategaki", type=int, default=None, metavar="HEIGHT",
+    mode.add_argument("--tategaki", type=int, default=None, metavar="HEIGHT",
                    help="vertical layout (縦書き), HEIGHT chars per column")
-    p.add_argument("--gap", type=int, default=1,
-                   help="spaces between tategaki columns (default: 1)")
-    p.add_argument("--unwrap", action="store_true",
+    mode.add_argument("--unwrap", action="store_true",
                    help="join hard-wrapped lines back into paragraphs")
-    p.add_argument("--rewrap", action="store_true",
+    mode.add_argument("--rewrap", action="store_true",
                    help="unwrap, then wrap again to -w columns")
+    mode.add_argument("--table", action="store_true",
+                   help="format CSV/TSV input as a table (-w is the total width budget)")
+    p.add_argument("--gap", type=int, default=None,
+                   help="with --tategaki: spaces between columns (default: 1)")
     p.add_argument("--indent-marks-paragraph", action="store_true",
                    help="with --unwrap/--rewrap: an indented line starts a new paragraph")
-    p.add_argument("--table", action="store_true",
-                   help="format CSV/TSV input as a table (-w is the total width budget)")
     p.add_argument("--delimiter", default=None,
                    help="CSV delimiter for --table (default: tab if the first line "
                         "has one, else comma; '\\t' means tab)")
@@ -77,32 +100,64 @@ def main(argv: Optional[List[str]] = None) -> int:
                    help="with --table: the first row is data, not a header")
     p.add_argument("--style", choices=STYLES, default="simple",
                    help="table style for --table (default: simple)")
+    p.add_argument("--placeholder", default=None,
+                   help="marker for cut text with --truncate / -n (default: …)")
+    p.add_argument("--encoding", default="utf-8",
+                   help="input encoding (default: utf-8; e.g. cp932 / shift_jis "
+                        "for Aozora Bunko texts)")
     p.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
     args = p.parse_args(argv)
 
-    w = args.width or _default_width()
+    w = args.width if args.width is not None else _default_width()
     if w < 1:
         p.error("width must be > 0")
-    if args.unwrap and args.rewrap:
-        p.error("--unwrap and --rewrap cannot be combined")
     if args.max_lines is not None and args.max_lines < 1:
         p.error("--max-lines must be >= 1")
-
-    chunks = []
-    if args.files:
-        for path in args.files:
-            with open(path, encoding="utf-8") as f:
-                chunks.append(f.read())
-    else:
-        chunks.append(sys.stdin.read())
-    text = "".join(chunks)
-
-    if args.tategaki is not None:
+    tate = args.tategaki is not None
+    if args.truncate or args.width_of or tate:
+        flag = ("--truncate" if args.truncate
+                else "--width-of" if args.width_of else "--tategaki")
+        for opt, dest, default in _WRAP_ONLY:
+            if getattr(args, dest) != default:
+                p.error(f"{opt} cannot be used with {flag}")
+        if not args.truncate and args.placeholder is not None:
+            p.error(f"--placeholder cannot be used with {flag}")
+    if tate:
         if args.tategaki < 1:
             p.error("--tategaki HEIGHT must be >= 1")
-        if args.gap < 0:
+        if args.gap is not None and args.gap < 0:
             p.error("--gap must be >= 0")
-        print(tategaki(text.rstrip("\n"), args.tategaki, gap=args.gap))
+    elif args.gap is not None:
+        p.error("--gap requires --tategaki")
+    placeholder = "…" if args.placeholder is None else args.placeholder
+    try:
+        codecs.lookup(args.encoding)
+    except LookupError:
+        p.error(f"unknown encoding: {args.encoding}")
+
+    chunks = []
+    for path in args.files or ["-"]:
+        name = "<stdin>" if path == "-" else path
+        try:
+            chunk = _read_input(path, args.encoding)
+        except UnicodeDecodeError:
+            p.exit(1, f"{p.prog}: error: {name}: cannot decode as "
+                      f"{args.encoding} (try --encoding, e.g. --encoding cp932)\n")
+        except OSError as e:
+            p.exit(1, f"{p.prog}: error: {name}: {e.strerror or e}\n")
+        # Each file is its own block: a missing final newline must not
+        # glue the last line to the next file's first line.
+        if chunk and not chunk.endswith("\n"):
+            chunk += "\n"
+        chunks.append(chunk)
+    text = "".join(chunks)
+
+    if tate:
+        gap = 1 if args.gap is None else args.gap
+        try:
+            print(tategaki(text.rstrip("\n"), args.tategaki, gap=gap))
+        except ValueError as e:
+            p.error(str(e))
         return 0
     if args.table:
         return _table(p, args, text)
@@ -111,8 +166,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(width(line, args.ambiguous_width))
         return 0
     if args.truncate:
-        for line in text.splitlines():
-            print(truncate(line, w, ambiguous_width=args.ambiguous_width))
+        try:
+            for line in text.splitlines():
+                print(truncate(line, w, placeholder=placeholder,
+                               ambiguous_width=args.ambiguous_width))
+        except ValueError as e:
+            p.error(str(e))
         return 0
     if args.unwrap:
         out = unwrap(text, indent_marks_paragraph=args.indent_marks_paragraph)
@@ -128,6 +187,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 initial_indent=args.indent,
                 subsequent_indent=args.subsequent_indent,
                 max_lines=args.max_lines,
+                placeholder=placeholder,
                 ambiguous_width=args.ambiguous_width,
                 rules=args.rules,
                 ansi_reflow=args.ansi_reflow,
@@ -139,19 +199,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
     try:
         out = fill(
-        text.rstrip("\n"),
-        w,
-        hanging=args.hanging,
-        break_long_words=not args.no_break_long_words,
-        keep_all=args.keep_all,
-        initial_indent=args.indent,
-        subsequent_indent=args.subsequent_indent,
-        max_lines=args.max_lines,
-        ambiguous_width=args.ambiguous_width,
-        rules=args.rules,
-        ansi_reflow=args.ansi_reflow,
-        ruby=args.ruby,
-        ruby_width=args.ruby_width,
+            text.rstrip("\n"),
+            w,
+            hanging=args.hanging,
+            break_long_words=not args.no_break_long_words,
+            keep_all=args.keep_all,
+            initial_indent=args.indent,
+            subsequent_indent=args.subsequent_indent,
+            max_lines=args.max_lines,
+            placeholder=placeholder,
+            ambiguous_width=args.ambiguous_width,
+            rules=args.rules,
+            ansi_reflow=args.ansi_reflow,
+            ruby=args.ruby,
+            ruby_width=args.ruby_width,
         )
     except ValueError as e:
         p.error(str(e))
